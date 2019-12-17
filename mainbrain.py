@@ -1,5 +1,6 @@
 from McGilly import dbbot
 from McGilly import exercise
+from McGilly import validator
 import time
 import warnings
 
@@ -22,12 +23,25 @@ def main():
     print('\n--- Queue established, scraping initialized ---\n')
     # artist info scraped
     link, name, email, email_csv = exercise.list_scrape(queue)
+    print(email)
+    print(email_csv)
+
+    #validates email to ensure they are legit
+    validated_emails = []
+    for i in email_csv:
+        vali_value = validator.email_check(i)
+        if vali_value == 1:
+            validated_emails.append(i)
+        else:
+            pass
+
 
     # formats a csv file with info scraped appropriate for SendGrid
-    dbbot.sendgrid_csv_prep(email_csv, formatted_city)
+    dbbot.sendgrid_csv_prep(validated_emails, formatted_city)
     print("--- Preparing csv for Sendgrid CSV ---")
 
     # creates csv and excel file of all data pulled
+    #this does not use validated emails, it will use every email acquired so we have it stored somewhere
     dbbot.create_output_csv(formatted_city, link, name, email)
     print("--- CSV and Excel file saved ---")
 

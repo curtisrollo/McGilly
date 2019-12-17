@@ -2,10 +2,10 @@ city,city_ascii,state_id,state_name,county_fips,county_name,lat,lng,population,p
 Akutan,Akutan,AK,Alaska,2013,Aleutians East,54.1594,-165.7328,1042.0,1042.0,6.0,polygon,True,America/Nome,99553,1840023265,1
 Belkofski,Belkofski,AK,Alaska,2013,Aleutians East,55.0889,-162.0306,,,0.0,point,False,America/Nome,,1840011497,1
 Cold Bay,Cold Bay,AK,Alaska,2013,Aleutians East,55.2122,-162.7475,128.0,128.0,0.0,polygon,True,America/Nome,99571,1840000464,1
-False Pass,False Pass,AK,Alaska,2013,Aleutians East,54.8415,-163.34799999999996,44.0,44.0,0.0,polygon,True,America/Nome,99583,1840000481,0
-Herendeen Bay,Herendeen Bay,AK,Alaska,2013,Aleutians East,55.7681,-160.6858,,,0.0,point,False,America/Anchorage,,1840011592,0
-Ikatan,Ikatan,AK,Alaska,2013,Aleutians East,54.75,-163.3083,,,0.0,point,False,America/Nome,99583,1840012883,0
-King Cove,King Cove,AK,Alaska,2013,Aleutians East,55.0858,-162.2979,1014.0,1014.0,15.0,polygon,True,America/Nome,99612,1840023268,0
+False Pass,False Pass,AK,Alaska,2013,Aleutians East,54.8415,-163.34799999999996,44.0,44.0,0.0,polygon,True,America/Nome,99583,1840000481,1
+Herendeen Bay,Herendeen Bay,AK,Alaska,2013,Aleutians East,55.7681,-160.6858,,,0.0,point,False,America/Anchorage,,1840011592,1
+Ikatan,Ikatan,AK,Alaska,2013,Aleutians East,54.75,-163.3083,,,0.0,point,False,America/Nome,99583,1840012883,1
+King Cove,King Cove,AK,Alaska,2013,Aleutians East,55.0858,-162.2979,1014.0,1014.0,15.0,polygon,True,America/Nome,99612,1840023268,1
 Morzhovoi,Morzhovoi,AK,Alaska,2013,Aleutians East,54.9069,-163.3186,,,0.0,point,False,America/Nome,99583,1840011680,0
 Nelson Lagoon,Nelson Lagoon,AK,Alaska,2013,Aleutians East,55.8451,-161.6103,,,84.9,polygon,False,America/Anchorage,99571,1840023624,0
 Port Moller,Port Moller,AK,Alaska,2013,Aleutians East,55.9886,-160.5769,,,0.0,point,False,America/Anchorage,,1840011700,0
