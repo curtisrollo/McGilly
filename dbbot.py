@@ -42,7 +42,6 @@ def create_output_csv(location, link, name, email):
     df3 = pd.DataFrame(email)
     data_frame = [df, df1, df2, df3]
     df = pd.concat(data_frame, axis=1)
-    csv_name = location + ".csv"
     excel_name = location + ".xlsx"
     st_excel = "CitiesScraped/" + excel_name
     df.to_excel(st_excel, index=False)
