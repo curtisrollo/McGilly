@@ -24,8 +24,8 @@ def main():
     link, name, email, email_csv = exercise.list_scrape(queue)
 
     # formats a csv file with info scraped appropriate for SendGrid
-    sendGrid_csv = dbbot.sendgrid_csv_prep(email_csv, formatted_city)
-    print("--- Preparing csv for Sendgrid upload ---")
+    dbbot.sendgrid_csv_prep(email_csv, formatted_city)
+    print("--- Preparing csv for Sendgrid CSV ---")
 
     # creates csv and excel file of all data pulled
     dbbot.create_output_csv(formatted_city, link, name, email)
@@ -47,36 +47,37 @@ if __name__ == "__main__":
     print("--- Hi, I'm McGilly, ready to scrape the web? ---")
     time.sleep(10)
     mcgilly_time = time.time()
-    for i in range(1,10):
-        tries = 3
-        for j in range(tries):
-            try:
-                # to track the time
-                start_time = time.time()
-                main()
-                # displays length of time of program
-                print("--- %s seconds ---" % (time.time() - start_time))
-            except Exception as e:
-                if i < tries - 1:  # i is zero indexed
-                    print("Error occured")
-                    continue
-                else:
-                    raise
-            break
-    for i in range(1,10):
-        tries = 3
-        for j in range(tries):
-            try:
-                # to track the time
-                start_time = time.time()
-                main()
-                # displays length of time of program
-                print("--- %s seconds ---" % (time.time() - start_time))
-            except Exception as e:
-                if i < tries - 1:  # i is zero indexed
-                    print("Error occured")
-                    continue
-                else:
-                    raise
-            break
+    main()
+    # for i in range(1,10):
+    #     tries = 3
+    #     for j in range(tries):
+    #         try:
+    #             # to track the time
+    #             start_time = time.time()
+    #             main()
+    #             # displays length of time of program
+    #             print("--- %s seconds ---" % (time.time() - start_time))
+    #         except Exception as e:
+    #             if i < tries - 1:  # i is zero indexed
+    #                 print("Error occured")
+    #                 continue
+    #             else:
+    #                 raise
+    #         break
+    # for i in range(1,10):
+    #     tries = 3
+    #     for j in range(tries):
+    #         try:
+    #             # to track the time
+    #             start_time = time.time()
+    #             main()
+    #             # displays length of time of program
+    #             print("--- %s seconds ---" % (time.time() - start_time))
+    #         except Exception as e:
+    #             if i < tries - 1:  # i is zero indexed
+    #                 print("Error occured")
+    #                 continue
+    #             else:
+    #                 raise
+    #         break
     print("--- %s seconds ---" % (time.time() - mcgilly_time))
