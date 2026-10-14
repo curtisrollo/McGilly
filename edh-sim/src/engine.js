@@ -3177,8 +3177,7 @@
       this.playLand(p);
       let guard = 0;
       while (guard++ < 40 && !p.lost && !this.over) {
-        const options = this.castables(p).map((o) => ({ ...o, s: this.scoreCast(p, o.c, o.from) })).filter((o) => o.s > 0)
-          .filter((o) => this.pay(p, this.costFor(p, o.c, o.from)) && (!o.c.info.cost.x || this.maxX(p, o.c.info.cost) >= this.minX(o.c)));
+        const options = this.castOptions(p);
         if (!options.length) break;
         options.sort((a, b) => b.s - a.s);
         const o = options[0];
@@ -3224,6 +3223,13 @@
         const t = this.bestOppTarget(p, (x) => x.info.isCreature && this.targetable(x, p) && this.toughness(x) - x.dmg <= Math.min(c.p1 - 1, 3) && this.creatureValue(x) >= 5);
         if (t && c.p1 > 1) { const need = this.toughness(t) - t.dmg; c.p1 -= need; t.dmg += this.scaleDamage(p.seat, t.ctrl, need); this.emit('removal', `${c.info.name} pings ${t.info.name}.`, { seat: p.seat, cards: [c.id, t.id], target: t.ctrl }); this.checkState(); }
       }
+    }
+
+    // Spells the AI wants to cast right now and can pay for, best first
+    castOptions(p) {
+      return this.castables(p).map((o) => ({ ...o, s: this.scoreCast(p, o.c, o.from) })).filter((o) => o.s > 0)
+        .filter((o) => this.pay(p, this.costFor(p, o.c, o.from)) && (!o.c.info.cost.x || this.maxX(p, o.c.info.cost) >= this.minX(o.c)))
+        .sort((a, b) => b.s - a.s);
     }
 
     minX(c) {
@@ -3326,11 +3332,21 @@
     lateGameMana(p) {
       // Beledros: pay 10 life to untap lands when there is something big to cast
       const bel = p.bf.find((c) => c.info.beledros);
-      if (bel && bel.usedTurn !== this.turn && p.life >= 26 && p.hand.some((c) => !c.info.isLand && c.info.mv >= 4)) {
-        bel.usedTurn = this.turn; this.loseLife(p, 10);
-        for (const c of p.bf) if (c.info.isLand) c.tapped = false;
-        this.emit('ability', `${p.name} pays 10 life: Beledros untaps all their lands.`, { seat: p.seat, cards: [bel.id] });
-        this.mainPhase(p, 'again');
+      if (bel && bel.usedTurn !== this.turn && p.life >= 22) {
+        // only pay the 10 life if untapping actually unlocks a play the AI wants and can now afford
+        const tappedLands = p.bf.filter((c) => c.info.isLand && c.tapped);
+        const before = new Set(this.castOptions(p).map((o) => o.c.id));
+        for (const c of tappedLands) c.tapped = false;
+        const unlocked = this.castOptions(p).filter((o) => !before.has(o.c.id) && o.s >= 12);
+        for (const c of tappedLands) c.tapped = true;
+        if (tappedLands.length >= 3 && unlocked.length) {
+          bel.usedTurn = this.turn; this.loseLife(p, 10);
+          for (const c of tappedLands) c.tapped = false;
+          this.emit('ability', `${p.name} pays 10 life: Beledros untaps ${tappedLands.length} lands to cast ${unlocked[0].c.info.name}.`, { seat: p.seat, cards: [bel.id] });
+          const o = unlocked[0];
+          if (o.c.zone === (o.from === 'command' ? 'command' : o.from === 'gy' ? 'gy' : 'hand') || o.from === 'citadel' || o.from === 'top') this.castSpell(p, o.c, o.from, o.gyType);
+          this.mainPhase(p, 'again');
+        }
       }
       // Infinity stones: harness when there's mana to spare
       for (const c of p.bf) if (c.info.harness && !c.harnessed) {
