@@ -3342,9 +3342,11 @@
         const unlocked = this.castOptions(p).filter((o) => !before.has(o.c.id) && o.s >= 12);
         for (const c of tappedLands) c.tapped = true;
         if (tappedLands.length >= 3 && unlocked.length) {
-          bel.usedTurn = this.turn; this.loseLife(p, 10);
-          for (const c of tappedLands) c.tapped = false;
+          bel.usedTurn = this.turn;
           this.emit('ability', `${p.name} pays 10 life: Beledros untaps ${tappedLands.length} lands to cast ${unlocked[0].c.info.name}.`, { seat: p.seat, cards: [bel.id] });
+          this.loseLife(p, 10); this.checkState();
+          if (this.over || p.lost) return;
+          for (const c of tappedLands) c.tapped = false;
           const o = unlocked[0];
           if (o.c.zone === (o.from === 'command' ? 'command' : o.from === 'gy' ? 'gy' : 'hand') || o.from === 'citadel' || o.from === 'top') this.castSpell(p, o.c, o.from, o.gyType);
           this.mainPhase(p, 'again');
