@@ -234,6 +234,31 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
 .drawer[hidden] { display: none; }
 
 .topbar, .now { flex-shrink: 0; }
+
+/* mana symbols */
+.mp { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; border-radius: 50%; font: 700 10px/1 var(--font-num); border: 1px solid rgba(0,0,0,.35); box-shadow: inset 0 -2px 0 rgba(0,0,0,.18); flex: none; }
+.mp-W { background: var(--mW); color: #3b3220; } .mp-U { background: var(--mU); color: #fff; } .mp-B { background: var(--mB); color: #f1e7f5; }
+.mp-R { background: var(--mR); color: #fff; } .mp-G { background: var(--mG); color: #fff; } .mp-C { background: var(--mC); color: #26231d; }
+.mp-A { background: conic-gradient(var(--mW) 0 20%, var(--mU) 0 40%, var(--mB) 0 60%, var(--mR) 0 80%, var(--mG) 0); color: #fff; }
+.mp-L { background: #7a2b2b; color: #fff; }
+.tray { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; padding: 3px 6px; border-radius: 999px; background: rgba(0,0,0,.25); align-self: flex-start; }
+.tray .tl { font-size: 9px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 0 3px 0 4px; }
+.tray .tl:first-child { margin-left: 0; }
+.mp.fresh { animation: pop .5s ease-out both; }
+.mp.float { animation: bob 1.6s ease-in-out infinite; }
+@keyframes pop { 0% { transform: scale(.2) translateY(6px); opacity: 0; } 70% { transform: scale(1.15); opacity: 1; } 100% { transform: none; } }
+@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+.now .paid { display: inline-flex; gap: 2px; margin-left: 4px; flex: none; }
+.c.manasrc { box-shadow: 0 0 0 2px #7fc4ff, 0 0 10px rgba(127,196,255,.6); }
+.land.manasrc { border-color: #7fc4ff; box-shadow: 0 0 8px rgba(127,196,255,.55); }
+/* graveyard / exile buttons and viewer */
+.zbtn { background: none; border: 0; border-bottom: 1px dotted var(--muted); color: inherit; font: inherit; padding: 0; cursor: pointer; }
+.zbtn:hover { color: var(--brass); border-bottom-color: var(--brass); }
+.zone-title { font-family: var(--font-display); font-weight: 400; font-size: 18px; margin: 0; color: var(--brass); }
+.zone-sub { margin: 0; color: var(--muted); font-size: 12px; }
+.zone-cards { gap: 6px; }
+#zoneView .drawer-box { width: min(900px, 100%); }
+@media (prefers-reduced-motion: reduce) { .mp.fresh, .mp.float { animation: none; } }
 </style>
 <div class="wrap">
   <header class="topbar" role="toolbar" aria-label="Playback">
@@ -267,6 +292,14 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       <div id="statsOut"></div>
     </section>
     <p class="note"><b>How it plays.</b> Every one of the 449 different cards in these decks has its rules text handled: a general parser covers the common patterns, and the rest have their own scripts. That includes the combos: Sanguine Bond, Vito, Dina or Enduring Tenacity with Exquisite Blood or Bloodthirsty Conqueror; Basalt Monolith with Rings of Brighthearth into Staff of Domination, Aetherflux Reservoir or Walking Ballista; Karn with Mycosynth Lattice; and death-trigger drains with sacrifice outlets. Effects that multiply each other stack the way they should: token and counter doublers, Fiery Emancipation and Gisela, Terror of the Peaks with Dragon tokens, extra combats with Kaalia. Each player is a heuristic AI. It sees the board, plays to win and holds up counterspells and protection, but it won't find every line a strong human would. Click any card to read it. Space plays and pauses, and the arrow keys step through the game. Card data comes from the open-source Forge project. Card art is generic, picked by creature or card type, using icons by the artists at <a href="https://game-icons.net" target="_blank" rel="noopener">game-icons.net</a> (CC BY 3.0). Decks: Edgar (100 cards), Kaalia (100 cards), Beledros (100 cards), Atraxa (100 cards), Osgir (100 cards), Myrkul (100 cards), Muldrotha (100 cards).</p>
+  </div>
+</div>
+<div class="drawer" id="zoneView" hidden>
+  <div class="drawer-box" role="dialog" aria-labelledby="zoneTitle">
+    <button type="button" class="x" id="closeZone" aria-label="Close">×</button>
+    <h2 class="zone-title" id="zoneTitle"></h2>
+    <p class="zone-sub">Most recent first. Click a card to read it.</p>
+    <div class="cards zone-cards" id="zoneCards"></div>
   </div>
 </div>
 <div class="inspect" id="inspect" hidden></div>
@@ -1239,6 +1272,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     emit(kind, text, extra = {}) {
       if (!this.record) return;
       const ev = { kind, text, seat: extra.seat ?? null, cards: extra.cards || [], turn: this.round, active: this.active, phase: this.phase || '' };
+      if (this.pendingMana && ['cast', 'ability', 'counter', 'response', 'combo'].includes(kind)) { ev.mana = this.pendingMana; this.pendingMana = null; }
       ev.snap = this.snapshot(extra);
       this.events.push(ev);
     }
@@ -1248,7 +1282,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       for (const p of this.players) for (const c of p.bf.concat(p.hand, p.command)) if (!this.metaSeen[c.id]) this.metaSeen[c.id] = this.cardMeta(c);
       return {
         players: this.players.map((p) => ({
-          life: p.life, poison: p.poison, lost: p.lost, lostReason: p.lostReason, tax: p.tax,
+          life: p.life, poison: p.poison, lost: p.lost, lostReason: p.lostReason, tax: p.tax, fl: { ...(p.floating || {}), ...(p.pool ? { ANY: (p.floating?.ANY || 0) + p.pool } : {}) }, ex: p.exile.map((c) => c.id),
           hand: p.hand.map((c) => c.id), lib: p.library.length, gy: p.gy.map((c) => c.id), exile: p.exile.length,
           command: p.command.map((c) => c.id), cmdDmg: { ...p.cmdDmg },
           bf: p.bf.map((c) => {
@@ -1634,7 +1668,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       this._sacPower = this.power(c);
       this.destroy(c, 'sacrificed', true);
       for (const f of so.fx || []) if (['draw', 'tutor', 'counters', 'millPower'].includes(f.k)) this.resolveEffect(p, f, outlet, 0, true);
-      if (so.addsMana) p.pool = (p.pool || 0) + 2;
+      if (so.addsMana) this.addFloating(p, 'C', 2);
       return true;
     }
     fodder(p, outlet) {
@@ -1760,17 +1794,18 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       return out;
     }
     availableMana(p) {
-      return this.sources(p).reduce((s, x) => s + Math.max(...x.opts.map((o) => o.amount)), 0) + (p.pool || 0);
+      return this.sources(p).reduce((s, x) => s + Math.max(...x.opts.map((o) => o.amount)), 0) + (p.pool || 0) + Object.values(p.floating || {}).reduce((a, b) => a + b, 0);
     }
 
     // Attempt to pay; returns plan or null. If commit, taps sources.
     pay(p, cost, xVal = 0, commit = false, extraGeneric = 0) {
       const srcs = this.sources(p).map((s) => ({ ...s, used: false }));
-      const pool = {}; // floating mana from multi-amount sources
-      if (p.pool) pool.ANY = p.pool;
+      const pool = { ...(p.floating || {}) }; // mana already floating, plus extra from multi-amount sources
+      if (p.pool) pool.ANY = (pool.ANY || 0) + p.pool;
+      const spent = []; // what actually paid for this, for the display
       const take = (color) => {
-        if (pool[color] > 0) { pool[color]--; return true; }
-        if (pool.ANY > 0) { pool.ANY--; return true; }
+        if (pool[color] > 0) { pool[color]--; spent.push(color); return true; }
+        if (pool.ANY > 0) { pool.ANY--; spent.push(color); return true; }
         return false;
       };
       let lifePaid = 0;
@@ -1793,10 +1828,11 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
         }
         if (best) {
           best.used = true; used.push({ s: best, o: bestOpt });
+          spent.push(bestCol);
           if (bestOpt.amount > 1) pool[bestCol] = (pool[bestCol] || 0) + bestOpt.amount - 1;
           continue;
         }
-        if (pip.phy && p.life > 12) { lifePaid += 2; continue; }
+        if (pip.phy && p.life > 12) { lifePaid += 2; spent.push('L'); continue; }
         if (pip.two) { extraGeneric += 2; continue; }
         return null;
       }
@@ -1804,7 +1840,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       if (p.infMana === this.turn) generic = 0;
       const poolTotal = () => Object.values(pool).reduce((a, b) => a + b, 0);
       while (generic > 0) {
-        if (poolTotal() > 0) { const k = Object.keys(pool).find((k) => pool[k] > 0); pool[k]--; generic--; continue; }
+        if (poolTotal() > 0) { const k = ['C', 'ANY', ...COLORS].find((x) => pool[x] > 0) || Object.keys(pool).find((x) => pool[x] > 0); pool[k]--; generic--; spent.push(k === 'ANY' ? 'C' : k); continue; }
         let best = null, bestScore = 1e9, bestOpt = null;
         for (const s of srcs) {
           if (s.used) continue;
@@ -1817,10 +1853,16 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
         if (!best) return null;
         best.used = true; used.push({ s: best, o: bestOpt });
         const take2 = Math.min(bestOpt.amount, generic); generic -= take2;
-        if (bestOpt.amount > take2) pool.C = (pool.C || 0) + bestOpt.amount - take2;
+        const g = bestOpt.colors.length === 1 ? bestOpt.colors[0] : bestOpt.colors.includes('C') ? 'C' : bestOpt.colors.find((x) => p.colors.includes(x)) || bestOpt.colors[0];
+        for (let i = 0; i < take2; i++) spent.push(g);
+        if (bestOpt.amount > take2) pool[g] = (pool[g] || 0) + bestOpt.amount - take2;
       }
       if (commit) {
         p.pool = 0;
+        // leftover mana floats until the step ends
+        p.floating = {};
+        for (const [k, v] of Object.entries(pool)) if (v > 0) p.floating[k] = v;
+        this.pendingMana = spent.length || Object.keys(p.floating).length ? { seat: p.seat, spent, sources: used.map(({ s }) => s.c.id) } : null;
         for (const { s, o } of used) {
           if (s.counters) { s.c.p1 = 0; continue; }
           if (s.fodder) { if (s.fodder.zone === 'bf') this.destroy(s.fodder, 'sacrificed', true); if (s.tapSrc) s.c.tapped = true; continue; }
@@ -1974,7 +2016,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
           if (!quiet) this.emit('ramp', `${p.name} ramps${got ? ` into ${got} land${got > 1 ? 's' : ''}` : ''} with ${name}.`, { seat: p.seat, cards: src ? [src.id] : [] });
           break;
         }
-        case 'ritual': p.pool = (p.pool || 0) + fx.n; break;
+        case 'ritual': this.addFloating(p, fx.color || 'C', fx.n); this.emit('effect', `${name} adds ${fx.n} ${({ W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green' })[fx.color] || 'colorless'} mana.`, { seat: p.seat }); break;
         case 'treasure': this.addToken(p, { treasure: true }, X(fx.n) || 1, quiet); break;
         case 'tokens': {
           let n = X(fx.n);
@@ -2322,7 +2364,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
         }
         case 'fog': this.fogTurn = this.turn; this.emit('response', `${name}: all combat damage this turn is prevented.`, { seat: p.seat }); break;
         case 'impulse': { const top = p.library.splice(0, fx.n); for (const c of top) { c.zone = 'hand'; c.impulseTurn = this.turn; p.hand.push(c); } this.emit('draw', `${name}: ${p.name} exiles the top ${top.length} and may play them this turn.`, { seat: p.seat }); break; }
-        case 'jeska': { const n = Math.max(0, ...this.opps(p).map((q) => q.hand.length)); p.pool = (p.pool || 0) + n; this.emit('effect', `${name} adds ${n} red mana.`, { seat: p.seat }); break; }
+        case 'jeska': { const n = Math.max(0, ...this.opps(p).map((q) => q.hand.length)); this.addFloating(p, 'R', n); this.emit('effect', `${name} adds ${n} red mana.`, { seat: p.seat }); break; }
         case 'emblem': {
           if (fx.e === 'garruk') { const q = this.opps(p).sort((a, b) => b.life - a.life)[0]; if (q) { q.emblems = (q.emblems || []).concat('garruk'); } }
           else p.emblems = (p.emblems || []).concat(fx.e);
@@ -3111,7 +3153,11 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
 
     get startSeat() { if (this._start == null) this._start = this.active; return this._start; }
 
+    // Mana empties from every pool when a step or phase ends
+    addFloating(p, color, n) { if (n > 0) { p.floating = p.floating || {}; p.floating[color] = (p.floating[color] || 0) + n; } }
+    emptyPools() { for (const q of this.players) { q.floating = {}; q.pool = 0; } this.pendingMana = null; }
     takeTurn(p, first) {
+      this.emptyPools();
       this.turn++;
       this.phase = 'untap';
       p.landsPlayed = 0; p.gyCastTypes = new Set(); p.pool = 0; p.spellsThisTurn = 0; p.nonArtifactSpells = 0; p.walkerUses = 0; p.silencedBy = null;
@@ -3178,13 +3224,16 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       this.mainPhase(p);
       if (p.lost || this.over) return;
       // combat
+      this.emptyPools();
       this.phase = 'combat';
       this.combat(p);
       if (p.lost || this.over) return;
+      this.emptyPools();
       this.phase = 'main 2';
       this.mainPhase(p, true);
       if (p.lost || this.over) return;
       // end step
+      this.emptyPools();
       this.phase = 'end';
       for (const q of this.alive()) for (const c of [...q.bf]) for (const e of c.info.endstep) {
         if (!e.each && q !== p) continue;
@@ -3250,7 +3299,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     }
 
     mainPhase(p, second = false) {
-      if (!second && p.drainMana) { p.pool = (p.pool || 0) + p.drainMana; this.emit('effect', `Mana Drain gives ${p.name} ${p.drainMana} extra mana.`, { seat: p.seat }); p.drainMana = 0; }
+      if (!second && p.drainMana) { this.addFloating(p, 'C', p.drainMana); this.emit('effect', `Mana Drain gives ${p.name} ${p.drainMana} extra mana.`, { seat: p.seat }); p.drainMana = 0; }
       this.playLand(p);
       let guard = 0;
       while (guard++ < 40 && !p.lost && !this.over) {
@@ -3837,7 +3886,9 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
   const { Game } = window.PodSim;
   const $ = (s, el = document) => el.querySelector(s);
   const MANA = { W: 'var(--mW)', U: 'var(--mU)', B: 'var(--mB)', R: 'var(--mR)', G: 'var(--mG)', C: 'var(--mC)' };
-  const SPEEDS = [0.5, 1, 2, 4, 10];
+  // 2× here is the old 0.5× pace; everything is four times slower than the first version
+  const SPEEDS = [0.25, 0.5, 1, 2, 4, 10, 40];
+  const PACE = 4;
   const BASE_DELAY = { turn: 1100, attack: 1300, block: 1000, damage: 1200, wipe: 1600, combo: 2200, lose: 1800, win: 0, counter: 1300, start: 700, mulligan: 350, draw: 500, land: 450 };
 
   const state = {
@@ -3855,6 +3906,11 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     if (cs.length > 1) return 'var(--mM)';
     return MANA[cs[0]];
   }
+  // Mana symbols: W U B R G C, plus L for life paid (Phyrexian)
+  function manaPips(list, cls = '') {
+    return list.map((c) => `<span class="mp mp-${c === 'ANY' ? 'A' : c} ${cls}" title="${({ W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green', C: 'Colorless', L: '2 life', ANY: 'Any color' })[c] || c}">${c === 'ANY' ? '★' : c === 'L' ? '♥' : c}</span>`).join('');
+  }
+  function poolList(fl) { const out = []; for (const k of ['W', 'U', 'B', 'R', 'G', 'C', 'ANY']) for (let i = 0; i < (fl[k] || 0); i++) out.push(k); return out; }
   function deckColors(d) { return window.PodSim.deckColorIdentity(db[d.commander]); }
 
   // ---------- setup ----------
@@ -3876,11 +3932,12 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     $('#scrub').addEventListener('input', (e) => { pause(); go(+e.target.value); });
     $('#hands').checked = state.showHands = load('showHands', true);
     $('#hands').addEventListener('change', (e) => { state.showHands = e.target.checked; save('showHands', state.showHands); render(); });
-    state.speed = load('speed', 1);
+    state.speed = load('pace', 2);
+    if (!SPEEDS.includes(state.speed)) state.speed = 2;
     const sp = $('#speed');
     sp.innerHTML = SPEEDS.map((s) => `<button type="button" data-s="${s}" aria-pressed="${s === state.speed}">${s}×</button>`).join('');
     sp.addEventListener('click', (e) => {
-      const s = +e.target.dataset.s; if (!s) return; state.speed = s; save('speed', s);
+      const s = +e.target.dataset.s; if (!s) return; state.speed = s; save('pace', s);
       sp.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.s === s)));
     });
     $('#log').addEventListener('click', (e) => { const li = e.target.closest('li[data-i]'); if (li) { pause(); go(+li.dataset.i); } });
@@ -3894,9 +3951,14 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       if (e.key === ' ') { e.preventDefault(); togglePlay(); }
       if (e.key === 'ArrowRight') { pause(); go(state.idx + 1); }
       if (e.key === 'ArrowLeft') { pause(); go(state.idx - 1); }
-      if (e.key === 'Escape') { state.inspect = null; renderInspect(); $('#more').hidden = true; }
+      if (e.key === 'Escape') { state.inspect = null; renderInspect(); $('#more').hidden = true; state.zoneView = null; renderZone(); }
     });
     $('#runStats').addEventListener('click', runStats);
+    document.addEventListener('click', (e) => {
+      const z = e.target.closest('.zbtn');
+      if (z) { state.zoneView = { zone: z.dataset.zone, seat: +z.dataset.seat }; renderZone(); }
+      if (e.target.id === 'closeZone' || e.target.id === 'zoneView') { state.zoneView = null; renderZone(); }
+    });
     $('#openMore').addEventListener('click', () => { $('#more').hidden = false; });
     $('#closeMore').addEventListener('click', () => { $('#more').hidden = true; });
     $('#more').addEventListener('click', (e) => { if (e.target.id === 'more') $('#more').hidden = true; });
@@ -3943,7 +4005,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     clearTimeout(state.timer);
     if (!state.playing) return;
     const ev = state.events[state.idx];
-    const d = (BASE_DELAY[ev.kind] ?? 750) / state.speed;
+    const d = ((BASE_DELAY[ev.kind] ?? 750) * PACE) / state.speed;
     if (state.idx >= state.events.length - 1) { pause(); return; }
     state.timer = setTimeout(() => { go(state.idx + 1); tick(); }, Math.max(30, d));
   }
@@ -3953,6 +4015,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     $('#scrub').value = state.idx;
     render(prev);
     markLog();
+    if (state.zoneView) renderZone();
   }
   function jumpTurn(dir) {
     for (let i = state.idx + dir; i >= 0 && i < state.events.length; i += dir) if (state.events[i].kind === 'turn') { go(i); return; }
@@ -3971,7 +4034,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       const cls = base && !isNaN(base[0]) ? (b.p > base[0] || b.t > base[1] ? 'up' : b.p < base[0] || b.t < base[1] ? 'down' : '') : '';
       pt = `<span class="pt ${cls}">${b.p}/${b.t}</span>`;
     }
-    const cls = ['c', b.tp ? 'tapped' : '', m.token ? 'token' : '', m.cmd ? 'cmd' : '', b.sk ? 'sick' : '', focus ? 'focus' : '', atk ? 'atk' : '', blk ? 'blk' : ''].join(' ');
+    const cls = ['c', state.tappedFor && state.tappedFor.has(b.id) ? 'manasrc' : '', b.tp ? 'tapped' : '', m.token ? 'token' : '', m.cmd ? 'cmd' : '', b.sk ? 'sick' : '', focus ? 'focus' : '', atk ? 'atk' : '', blk ? 'blk' : ''].join(' ');
     const ty = m.types.replace(/^Legendary /, '').split(' — ')[0];
     return `<button type="button" class="${cls}" style="--frame:${frameColor(m.colors)}" data-card="${b.id}" title="${esc(m.name)}">
       <span class="n">${esc(m.name)}</span><span class="pic">${artSvg(m, b.id)}</span>${attachName ? `<span class="att">⚲ ${esc(attachName)}</span>` : ''}
@@ -3983,11 +4046,11 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     for (const b of lands) {
       const m = state.meta[b.id];
       const g = groups.get(m.name) || { n: 0, tapped: 0, id: b.id, focus: false, colors: m };
-      g.n++; if (b.tp) g.tapped++; if (focus.has(b.id)) g.focus = true; groups.set(m.name, g);
+      g.n++; if (b.tp) g.tapped++; if (focus.has(b.id)) g.focus = true; if (state.tappedFor && state.tappedFor.has(b.id)) g.src = true; groups.set(m.name, g);
     }
     return [...groups.entries()].map(([name, g]) => {
       const untapped = g.n - g.tapped;
-      return `<button type="button" class="land ${g.focus ? 'focus' : ''}" data-card="${g.id}"><span class="dot" style="background:${landColor(g.id)}"></span>${esc(name)}${g.n > 1 ? ` <em>×${g.n}</em>` : ''}${g.tapped ? ` <em>${untapped ? `(${untapped} untapped)` : 'tapped'}</em>` : ''}</button>`;
+      return `<button type="button" class="land ${g.focus ? 'focus' : ''} ${g.src ? 'manasrc' : ''}" data-card="${g.id}"><span class="dot" style="background:${landColor(g.id)}"></span>${esc(name)}${g.n > 1 ? ` <em>×${g.n}</em>` : ''}${g.tapped ? ` <em>${untapped ? `(${untapped} untapped)` : 'tapped'}</em>` : ''}</button>`;
     }).join('');
   }
   function landColor(id) {
@@ -4005,6 +4068,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     const snap = ev.snap;
     const g = state.game;
     const focus = new Set(ev.cards);
+    state.tappedFor = new Set(ev.mana ? ev.mana.sources : []);
     const atk = new Set((snap.attackers || []).map((a) => a.id));
     const blk = new Set((snap.blockers || []).map((b) => b.id));
     const prevSnap = prevIdx != null && state.events[prevIdx] ? state.events[prevIdx].snap : null;
@@ -4012,7 +4076,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     const now = $('#now');
     now.className = 'now k-' + ev.kind;
     const seatName = ev.seat != null ? g.players[ev.seat].name : '';
-    now.innerHTML = `<span class="turn">${ev.turn ? 'Turn ' + ev.turn : 'Setup'}</span>${ev.phase && ev.turn ? `<span class="phase">${esc(g.players[ev.active].name)} · ${esc(ev.phase)}</span>` : ''}<span class="txt">${esc(ev.text)}</span>`;
+    now.innerHTML = `<span class="turn">${ev.turn ? 'Turn ' + ev.turn : 'Setup'}</span>${ev.phase && ev.turn ? `<span class="phase">${esc(g.players[ev.active].name)} · ${esc(ev.phase)}</span>` : ''}<span class="txt">${esc(ev.text)}</span>${ev.mana && ev.mana.spent.length ? `<span class="paid" title="Mana spent">${manaPips(ev.mana.spent)}</span>` : ''}`;
     $("#pos").textContent = `step ${state.idx + 1}`;
     const finalEv = state.events[state.events.length - 1];
     const table = $('#table');
@@ -4039,10 +4103,11 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
         <div class="seat-head">
           <div class="pips">${colors.map((c) => `<span class="pip" style="background:${MANA[c]}"></span>`).join('')}</div>
           <div class="seat-name"><b>${esc(d.name)}</b><small>${esc(d.commander)}</small></div>
-          <div class="stats"><span>Hand <b>${s.hand.length}</b></span><span>Lib <b>${s.lib}</b></span><span>GY <b>${s.gy.length}</b></span>${s.tax ? `<span>Tax <b>+${s.tax * 2}</b></span>` : ''}${s.poison ? `<span class="cmddmg">Poison <b>${s.poison}</b></span>` : ''}${cmdDmg}</div>
+          <div class="stats"><span>Hand <b>${s.hand.length}</b></span><span>Lib <b>${s.lib}</b></span><button type="button" class="zbtn" data-zone="gy" data-seat="${i}" title="Look through ${esc(d.name)}'s graveyard">GY <b>${s.gy.length}</b></button>${s.ex.length ? `<button type="button" class="zbtn" data-zone="ex" data-seat="${i}" title="Look through ${esc(d.name)}'s exile">Exile <b>${s.ex.length}</b></button>` : ''}${s.tax ? `<span>Tax <b>+${s.tax * 2}</b></span>` : ''}${s.poison ? `<span class="cmddmg">Poison <b>${s.poison}</b></span>` : ''}${cmdDmg}</div>
           ${status}
           <div class="${lifeCls}" aria-label="Life ${s.life}">${s.life}</div>
         </div>
+        ${(() => { const paid = ev.mana && ev.mana.seat === i ? ev.mana.spent : []; const fl = poolList(s.fl || {}); return paid.length || fl.length ? `<div class="tray">${paid.length ? `<span class="tl">Paid</span>${manaPips(paid, 'fresh')}` : ''}${fl.length ? `<span class="tl">Floating</span>${manaPips(fl, 'float')}` : ''}</div>` : ''; })()}
         <div class="seat-body">
           <div class="zone">${cmdTiles ? `<span class="zl">Command</span>${cmdTiles}` : ''}<span class="zl">Creatures ${creatures.length}</span>${creatures.length ? tiles(creatures) : '<span class="empty">none</span>'}</div>
           ${others.length ? `<div class="zone"><span class="zl">Other ${others.length}</span>${tiles(others)}</div>` : ''}
@@ -4082,6 +4147,19 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       li.classList.add('cur');
       log.scrollTop = log.scrollHeight;
     }
+  }
+
+  // Graveyard / exile browser; follows the game as it plays
+  function renderZone() {
+    const el = $('#zoneView');
+    const zv = state.zoneView;
+    if (!zv || !state.events[state.idx]) { el.hidden = true; return; }
+    const sp = state.events[state.idx].snap.players[zv.seat];
+    const ids = (zv.zone === 'gy' ? sp.gy : sp.ex || []).slice().reverse();
+    const d = seatDecks()[zv.seat];
+    el.hidden = false;
+    $('#zoneTitle').textContent = `${d.name}'s ${zv.zone === 'gy' ? 'graveyard' : 'exile'} · ${ids.length} card${ids.length === 1 ? '' : 's'}`;
+    $('#zoneCards').innerHTML = ids.length ? ids.map((id) => cardTile({ id }, false)).join('') : '<span class="empty">Empty.</span>';
   }
 
   function renderInspect() {

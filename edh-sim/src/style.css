@@ -229,3 +229,28 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
 .drawer[hidden] { display: none; }
 
 .topbar, .now { flex-shrink: 0; }
+
+/* mana symbols */
+.mp { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; border-radius: 50%; font: 700 10px/1 var(--font-num); border: 1px solid rgba(0,0,0,.35); box-shadow: inset 0 -2px 0 rgba(0,0,0,.18); flex: none; }
+.mp-W { background: var(--mW); color: #3b3220; } .mp-U { background: var(--mU); color: #fff; } .mp-B { background: var(--mB); color: #f1e7f5; }
+.mp-R { background: var(--mR); color: #fff; } .mp-G { background: var(--mG); color: #fff; } .mp-C { background: var(--mC); color: #26231d; }
+.mp-A { background: conic-gradient(var(--mW) 0 20%, var(--mU) 0 40%, var(--mB) 0 60%, var(--mR) 0 80%, var(--mG) 0); color: #fff; }
+.mp-L { background: #7a2b2b; color: #fff; }
+.tray { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; padding: 3px 6px; border-radius: 999px; background: rgba(0,0,0,.25); align-self: flex-start; }
+.tray .tl { font-size: 9px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 0 3px 0 4px; }
+.tray .tl:first-child { margin-left: 0; }
+.mp.fresh { animation: pop .5s ease-out both; }
+.mp.float { animation: bob 1.6s ease-in-out infinite; }
+@keyframes pop { 0% { transform: scale(.2) translateY(6px); opacity: 0; } 70% { transform: scale(1.15); opacity: 1; } 100% { transform: none; } }
+@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+.now .paid { display: inline-flex; gap: 2px; margin-left: 4px; flex: none; }
+.c.manasrc { box-shadow: 0 0 0 2px #7fc4ff, 0 0 10px rgba(127,196,255,.6); }
+.land.manasrc { border-color: #7fc4ff; box-shadow: 0 0 8px rgba(127,196,255,.55); }
+/* graveyard / exile buttons and viewer */
+.zbtn { background: none; border: 0; border-bottom: 1px dotted var(--muted); color: inherit; font: inherit; padding: 0; cursor: pointer; }
+.zbtn:hover { color: var(--brass); border-bottom-color: var(--brass); }
+.zone-title { font-family: var(--font-display); font-weight: 400; font-size: 18px; margin: 0; color: var(--brass); }
+.zone-sub { margin: 0; color: var(--muted); font-size: 12px; }
+.zone-cards { gap: 6px; }
+#zoneView .drawer-box { width: min(900px, 100%); }
+@media (prefers-reduced-motion: reduce) { .mp.fresh, .mp.float { animation: none; } }

@@ -30,7 +30,9 @@
   const { Game } = window.PodSim;
   const $ = (s, el = document) => el.querySelector(s);
   const MANA = { W: 'var(--mW)', U: 'var(--mU)', B: 'var(--mB)', R: 'var(--mR)', G: 'var(--mG)', C: 'var(--mC)' };
-  const SPEEDS = [0.5, 1, 2, 4, 10];
+  // 2× here is the old 0.5× pace; everything is four times slower than the first version
+  const SPEEDS = [0.25, 0.5, 1, 2, 4, 10, 40];
+  const PACE = 4;
   const BASE_DELAY = { turn: 1100, attack: 1300, block: 1000, damage: 1200, wipe: 1600, combo: 2200, lose: 1800, win: 0, counter: 1300, start: 700, mulligan: 350, draw: 500, land: 450 };
 
   const state = {
@@ -48,6 +50,11 @@
     if (cs.length > 1) return 'var(--mM)';
     return MANA[cs[0]];
   }
+  // Mana symbols: W U B R G C, plus L for life paid (Phyrexian)
+  function manaPips(list, cls = '') {
+    return list.map((c) => `<span class="mp mp-${c === 'ANY' ? 'A' : c} ${cls}" title="${({ W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green', C: 'Colorless', L: '2 life', ANY: 'Any color' })[c] || c}">${c === 'ANY' ? '★' : c === 'L' ? '♥' : c}</span>`).join('');
+  }
+  function poolList(fl) { const out = []; for (const k of ['W', 'U', 'B', 'R', 'G', 'C', 'ANY']) for (let i = 0; i < (fl[k] || 0); i++) out.push(k); return out; }
   function deckColors(d) { return window.PodSim.deckColorIdentity(db[d.commander]); }
 
   // ---------- setup ----------
@@ -69,11 +76,12 @@
     $('#scrub').addEventListener('input', (e) => { pause(); go(+e.target.value); });
     $('#hands').checked = state.showHands = load('showHands', true);
     $('#hands').addEventListener('change', (e) => { state.showHands = e.target.checked; save('showHands', state.showHands); render(); });
-    state.speed = load('speed', 1);
+    state.speed = load('pace', 2);
+    if (!SPEEDS.includes(state.speed)) state.speed = 2;
     const sp = $('#speed');
     sp.innerHTML = SPEEDS.map((s) => `<button type="button" data-s="${s}" aria-pressed="${s === state.speed}">${s}×</button>`).join('');
     sp.addEventListener('click', (e) => {
-      const s = +e.target.dataset.s; if (!s) return; state.speed = s; save('speed', s);
+      const s = +e.target.dataset.s; if (!s) return; state.speed = s; save('pace', s);
       sp.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.s === s)));
     });
     $('#log').addEventListener('click', (e) => { const li = e.target.closest('li[data-i]'); if (li) { pause(); go(+li.dataset.i); } });
@@ -87,9 +95,14 @@
       if (e.key === ' ') { e.preventDefault(); togglePlay(); }
       if (e.key === 'ArrowRight') { pause(); go(state.idx + 1); }
       if (e.key === 'ArrowLeft') { pause(); go(state.idx - 1); }
-      if (e.key === 'Escape') { state.inspect = null; renderInspect(); $('#more').hidden = true; }
+      if (e.key === 'Escape') { state.inspect = null; renderInspect(); $('#more').hidden = true; state.zoneView = null; renderZone(); }
     });
     $('#runStats').addEventListener('click', runStats);
+    document.addEventListener('click', (e) => {
+      const z = e.target.closest('.zbtn');
+      if (z) { state.zoneView = { zone: z.dataset.zone, seat: +z.dataset.seat }; renderZone(); }
+      if (e.target.id === 'closeZone' || e.target.id === 'zoneView') { state.zoneView = null; renderZone(); }
+    });
     $('#openMore').addEventListener('click', () => { $('#more').hidden = false; });
     $('#closeMore').addEventListener('click', () => { $('#more').hidden = true; });
     $('#more').addEventListener('click', (e) => { if (e.target.id === 'more') $('#more').hidden = true; });
@@ -136,7 +149,7 @@
     clearTimeout(state.timer);
     if (!state.playing) return;
     const ev = state.events[state.idx];
-    const d = (BASE_DELAY[ev.kind] ?? 750) / state.speed;
+    const d = ((BASE_DELAY[ev.kind] ?? 750) * PACE) / state.speed;
     if (state.idx >= state.events.length - 1) { pause(); return; }
     state.timer = setTimeout(() => { go(state.idx + 1); tick(); }, Math.max(30, d));
   }
@@ -146,6 +159,7 @@
     $('#scrub').value = state.idx;
     render(prev);
     markLog();
+    if (state.zoneView) renderZone();
   }
   function jumpTurn(dir) {
     for (let i = state.idx + dir; i >= 0 && i < state.events.length; i += dir) if (state.events[i].kind === 'turn') { go(i); return; }
@@ -164,7 +178,7 @@
       const cls = base && !isNaN(base[0]) ? (b.p > base[0] || b.t > base[1] ? 'up' : b.p < base[0] || b.t < base[1] ? 'down' : '') : '';
       pt = `<span class="pt ${cls}">${b.p}/${b.t}</span>`;
     }
-    const cls = ['c', b.tp ? 'tapped' : '', m.token ? 'token' : '', m.cmd ? 'cmd' : '', b.sk ? 'sick' : '', focus ? 'focus' : '', atk ? 'atk' : '', blk ? 'blk' : ''].join(' ');
+    const cls = ['c', state.tappedFor && state.tappedFor.has(b.id) ? 'manasrc' : '', b.tp ? 'tapped' : '', m.token ? 'token' : '', m.cmd ? 'cmd' : '', b.sk ? 'sick' : '', focus ? 'focus' : '', atk ? 'atk' : '', blk ? 'blk' : ''].join(' ');
     const ty = m.types.replace(/^Legendary /, '').split(' — ')[0];
     return `<button type="button" class="${cls}" style="--frame:${frameColor(m.colors)}" data-card="${b.id}" title="${esc(m.name)}">
       <span class="n">${esc(m.name)}</span><span class="pic">${artSvg(m, b.id)}</span>${attachName ? `<span class="att">⚲ ${esc(attachName)}</span>` : ''}
@@ -176,11 +190,11 @@
     for (const b of lands) {
       const m = state.meta[b.id];
       const g = groups.get(m.name) || { n: 0, tapped: 0, id: b.id, focus: false, colors: m };
-      g.n++; if (b.tp) g.tapped++; if (focus.has(b.id)) g.focus = true; groups.set(m.name, g);
+      g.n++; if (b.tp) g.tapped++; if (focus.has(b.id)) g.focus = true; if (state.tappedFor && state.tappedFor.has(b.id)) g.src = true; groups.set(m.name, g);
     }
     return [...groups.entries()].map(([name, g]) => {
       const untapped = g.n - g.tapped;
-      return `<button type="button" class="land ${g.focus ? 'focus' : ''}" data-card="${g.id}"><span class="dot" style="background:${landColor(g.id)}"></span>${esc(name)}${g.n > 1 ? ` <em>×${g.n}</em>` : ''}${g.tapped ? ` <em>${untapped ? `(${untapped} untapped)` : 'tapped'}</em>` : ''}</button>`;
+      return `<button type="button" class="land ${g.focus ? 'focus' : ''} ${g.src ? 'manasrc' : ''}" data-card="${g.id}"><span class="dot" style="background:${landColor(g.id)}"></span>${esc(name)}${g.n > 1 ? ` <em>×${g.n}</em>` : ''}${g.tapped ? ` <em>${untapped ? `(${untapped} untapped)` : 'tapped'}</em>` : ''}</button>`;
     }).join('');
   }
   function landColor(id) {
@@ -198,6 +212,7 @@
     const snap = ev.snap;
     const g = state.game;
     const focus = new Set(ev.cards);
+    state.tappedFor = new Set(ev.mana ? ev.mana.sources : []);
     const atk = new Set((snap.attackers || []).map((a) => a.id));
     const blk = new Set((snap.blockers || []).map((b) => b.id));
     const prevSnap = prevIdx != null && state.events[prevIdx] ? state.events[prevIdx].snap : null;
@@ -205,7 +220,7 @@
     const now = $('#now');
     now.className = 'now k-' + ev.kind;
     const seatName = ev.seat != null ? g.players[ev.seat].name : '';
-    now.innerHTML = `<span class="turn">${ev.turn ? 'Turn ' + ev.turn : 'Setup'}</span>${ev.phase && ev.turn ? `<span class="phase">${esc(g.players[ev.active].name)} · ${esc(ev.phase)}</span>` : ''}<span class="txt">${esc(ev.text)}</span>`;
+    now.innerHTML = `<span class="turn">${ev.turn ? 'Turn ' + ev.turn : 'Setup'}</span>${ev.phase && ev.turn ? `<span class="phase">${esc(g.players[ev.active].name)} · ${esc(ev.phase)}</span>` : ''}<span class="txt">${esc(ev.text)}</span>${ev.mana && ev.mana.spent.length ? `<span class="paid" title="Mana spent">${manaPips(ev.mana.spent)}</span>` : ''}`;
     $("#pos").textContent = `step ${state.idx + 1}`;
     const finalEv = state.events[state.events.length - 1];
     const table = $('#table');
@@ -232,10 +247,11 @@
         <div class="seat-head">
           <div class="pips">${colors.map((c) => `<span class="pip" style="background:${MANA[c]}"></span>`).join('')}</div>
           <div class="seat-name"><b>${esc(d.name)}</b><small>${esc(d.commander)}</small></div>
-          <div class="stats"><span>Hand <b>${s.hand.length}</b></span><span>Lib <b>${s.lib}</b></span><span>GY <b>${s.gy.length}</b></span>${s.tax ? `<span>Tax <b>+${s.tax * 2}</b></span>` : ''}${s.poison ? `<span class="cmddmg">Poison <b>${s.poison}</b></span>` : ''}${cmdDmg}</div>
+          <div class="stats"><span>Hand <b>${s.hand.length}</b></span><span>Lib <b>${s.lib}</b></span><button type="button" class="zbtn" data-zone="gy" data-seat="${i}" title="Look through ${esc(d.name)}'s graveyard">GY <b>${s.gy.length}</b></button>${s.ex.length ? `<button type="button" class="zbtn" data-zone="ex" data-seat="${i}" title="Look through ${esc(d.name)}'s exile">Exile <b>${s.ex.length}</b></button>` : ''}${s.tax ? `<span>Tax <b>+${s.tax * 2}</b></span>` : ''}${s.poison ? `<span class="cmddmg">Poison <b>${s.poison}</b></span>` : ''}${cmdDmg}</div>
           ${status}
           <div class="${lifeCls}" aria-label="Life ${s.life}">${s.life}</div>
         </div>
+        ${(() => { const paid = ev.mana && ev.mana.seat === i ? ev.mana.spent : []; const fl = poolList(s.fl || {}); return paid.length || fl.length ? `<div class="tray">${paid.length ? `<span class="tl">Paid</span>${manaPips(paid, 'fresh')}` : ''}${fl.length ? `<span class="tl">Floating</span>${manaPips(fl, 'float')}` : ''}</div>` : ''; })()}
         <div class="seat-body">
           <div class="zone">${cmdTiles ? `<span class="zl">Command</span>${cmdTiles}` : ''}<span class="zl">Creatures ${creatures.length}</span>${creatures.length ? tiles(creatures) : '<span class="empty">none</span>'}</div>
           ${others.length ? `<div class="zone"><span class="zl">Other ${others.length}</span>${tiles(others)}</div>` : ''}
@@ -275,6 +291,19 @@
       li.classList.add('cur');
       log.scrollTop = log.scrollHeight;
     }
+  }
+
+  // Graveyard / exile browser; follows the game as it plays
+  function renderZone() {
+    const el = $('#zoneView');
+    const zv = state.zoneView;
+    if (!zv || !state.events[state.idx]) { el.hidden = true; return; }
+    const sp = state.events[state.idx].snap.players[zv.seat];
+    const ids = (zv.zone === 'gy' ? sp.gy : sp.ex || []).slice().reverse();
+    const d = seatDecks()[zv.seat];
+    el.hidden = false;
+    $('#zoneTitle').textContent = `${d.name}'s ${zv.zone === 'gy' ? 'graveyard' : 'exile'} · ${ids.length} card${ids.length === 1 ? '' : 's'}`;
+    $('#zoneCards').innerHTML = ids.length ? ids.map((id) => cardTile({ id }, false)).join('') : '<span class="empty">Empty.</span>';
   }
 
   function renderInspect() {

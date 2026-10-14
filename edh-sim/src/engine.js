@@ -966,6 +966,7 @@
     emit(kind, text, extra = {}) {
       if (!this.record) return;
       const ev = { kind, text, seat: extra.seat ?? null, cards: extra.cards || [], turn: this.round, active: this.active, phase: this.phase || '' };
+      if (this.pendingMana && ['cast', 'ability', 'counter', 'response', 'combo'].includes(kind)) { ev.mana = this.pendingMana; this.pendingMana = null; }
       ev.snap = this.snapshot(extra);
       this.events.push(ev);
     }
@@ -975,7 +976,7 @@
       for (const p of this.players) for (const c of p.bf.concat(p.hand, p.command)) if (!this.metaSeen[c.id]) this.metaSeen[c.id] = this.cardMeta(c);
       return {
         players: this.players.map((p) => ({
-          life: p.life, poison: p.poison, lost: p.lost, lostReason: p.lostReason, tax: p.tax,
+          life: p.life, poison: p.poison, lost: p.lost, lostReason: p.lostReason, tax: p.tax, fl: { ...(p.floating || {}), ...(p.pool ? { ANY: (p.floating?.ANY || 0) + p.pool } : {}) }, ex: p.exile.map((c) => c.id),
           hand: p.hand.map((c) => c.id), lib: p.library.length, gy: p.gy.map((c) => c.id), exile: p.exile.length,
           command: p.command.map((c) => c.id), cmdDmg: { ...p.cmdDmg },
           bf: p.bf.map((c) => {
@@ -1361,7 +1362,7 @@
       this._sacPower = this.power(c);
       this.destroy(c, 'sacrificed', true);
       for (const f of so.fx || []) if (['draw', 'tutor', 'counters', 'millPower'].includes(f.k)) this.resolveEffect(p, f, outlet, 0, true);
-      if (so.addsMana) p.pool = (p.pool || 0) + 2;
+      if (so.addsMana) this.addFloating(p, 'C', 2);
       return true;
     }
     fodder(p, outlet) {
@@ -1487,17 +1488,18 @@
       return out;
     }
     availableMana(p) {
-      return this.sources(p).reduce((s, x) => s + Math.max(...x.opts.map((o) => o.amount)), 0) + (p.pool || 0);
+      return this.sources(p).reduce((s, x) => s + Math.max(...x.opts.map((o) => o.amount)), 0) + (p.pool || 0) + Object.values(p.floating || {}).reduce((a, b) => a + b, 0);
     }
 
     // Attempt to pay; returns plan or null. If commit, taps sources.
     pay(p, cost, xVal = 0, commit = false, extraGeneric = 0) {
       const srcs = this.sources(p).map((s) => ({ ...s, used: false }));
-      const pool = {}; // floating mana from multi-amount sources
-      if (p.pool) pool.ANY = p.pool;
+      const pool = { ...(p.floating || {}) }; // mana already floating, plus extra from multi-amount sources
+      if (p.pool) pool.ANY = (pool.ANY || 0) + p.pool;
+      const spent = []; // what actually paid for this, for the display
       const take = (color) => {
-        if (pool[color] > 0) { pool[color]--; return true; }
-        if (pool.ANY > 0) { pool.ANY--; return true; }
+        if (pool[color] > 0) { pool[color]--; spent.push(color); return true; }
+        if (pool.ANY > 0) { pool.ANY--; spent.push(color); return true; }
         return false;
       };
       let lifePaid = 0;
@@ -1520,10 +1522,11 @@
         }
         if (best) {
           best.used = true; used.push({ s: best, o: bestOpt });
+          spent.push(bestCol);
           if (bestOpt.amount > 1) pool[bestCol] = (pool[bestCol] || 0) + bestOpt.amount - 1;
           continue;
         }
-        if (pip.phy && p.life > 12) { lifePaid += 2; continue; }
+        if (pip.phy && p.life > 12) { lifePaid += 2; spent.push('L'); continue; }
         if (pip.two) { extraGeneric += 2; continue; }
         return null;
       }
@@ -1531,7 +1534,7 @@
       if (p.infMana === this.turn) generic = 0;
       const poolTotal = () => Object.values(pool).reduce((a, b) => a + b, 0);
       while (generic > 0) {
-        if (poolTotal() > 0) { const k = Object.keys(pool).find((k) => pool[k] > 0); pool[k]--; generic--; continue; }
+        if (poolTotal() > 0) { const k = ['C', 'ANY', ...COLORS].find((x) => pool[x] > 0) || Object.keys(pool).find((x) => pool[x] > 0); pool[k]--; generic--; spent.push(k === 'ANY' ? 'C' : k); continue; }
         let best = null, bestScore = 1e9, bestOpt = null;
         for (const s of srcs) {
           if (s.used) continue;
@@ -1544,10 +1547,16 @@
         if (!best) return null;
         best.used = true; used.push({ s: best, o: bestOpt });
         const take2 = Math.min(bestOpt.amount, generic); generic -= take2;
-        if (bestOpt.amount > take2) pool.C = (pool.C || 0) + bestOpt.amount - take2;
+        const g = bestOpt.colors.length === 1 ? bestOpt.colors[0] : bestOpt.colors.includes('C') ? 'C' : bestOpt.colors.find((x) => p.colors.includes(x)) || bestOpt.colors[0];
+        for (let i = 0; i < take2; i++) spent.push(g);
+        if (bestOpt.amount > take2) pool[g] = (pool[g] || 0) + bestOpt.amount - take2;
       }
       if (commit) {
         p.pool = 0;
+        // leftover mana floats until the step ends
+        p.floating = {};
+        for (const [k, v] of Object.entries(pool)) if (v > 0) p.floating[k] = v;
+        this.pendingMana = spent.length || Object.keys(p.floating).length ? { seat: p.seat, spent, sources: used.map(({ s }) => s.c.id) } : null;
         for (const { s, o } of used) {
           if (s.counters) { s.c.p1 = 0; continue; }
           if (s.fodder) { if (s.fodder.zone === 'bf') this.destroy(s.fodder, 'sacrificed', true); if (s.tapSrc) s.c.tapped = true; continue; }
@@ -1701,7 +1710,7 @@
           if (!quiet) this.emit('ramp', `${p.name} ramps${got ? ` into ${got} land${got > 1 ? 's' : ''}` : ''} with ${name}.`, { seat: p.seat, cards: src ? [src.id] : [] });
           break;
         }
-        case 'ritual': p.pool = (p.pool || 0) + fx.n; break;
+        case 'ritual': this.addFloating(p, fx.color || 'C', fx.n); this.emit('effect', `${name} adds ${fx.n} ${({ W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green' })[fx.color] || 'colorless'} mana.`, { seat: p.seat }); break;
         case 'treasure': this.addToken(p, { treasure: true }, X(fx.n) || 1, quiet); break;
         case 'tokens': {
           let n = X(fx.n);
@@ -2049,7 +2058,7 @@
         }
         case 'fog': this.fogTurn = this.turn; this.emit('response', `${name}: all combat damage this turn is prevented.`, { seat: p.seat }); break;
         case 'impulse': { const top = p.library.splice(0, fx.n); for (const c of top) { c.zone = 'hand'; c.impulseTurn = this.turn; p.hand.push(c); } this.emit('draw', `${name}: ${p.name} exiles the top ${top.length} and may play them this turn.`, { seat: p.seat }); break; }
-        case 'jeska': { const n = Math.max(0, ...this.opps(p).map((q) => q.hand.length)); p.pool = (p.pool || 0) + n; this.emit('effect', `${name} adds ${n} red mana.`, { seat: p.seat }); break; }
+        case 'jeska': { const n = Math.max(0, ...this.opps(p).map((q) => q.hand.length)); this.addFloating(p, 'R', n); this.emit('effect', `${name} adds ${n} red mana.`, { seat: p.seat }); break; }
         case 'emblem': {
           if (fx.e === 'garruk') { const q = this.opps(p).sort((a, b) => b.life - a.life)[0]; if (q) { q.emblems = (q.emblems || []).concat('garruk'); } }
           else p.emblems = (p.emblems || []).concat(fx.e);
@@ -2838,7 +2847,11 @@
 
     get startSeat() { if (this._start == null) this._start = this.active; return this._start; }
 
+    // Mana empties from every pool when a step or phase ends
+    addFloating(p, color, n) { if (n > 0) { p.floating = p.floating || {}; p.floating[color] = (p.floating[color] || 0) + n; } }
+    emptyPools() { for (const q of this.players) { q.floating = {}; q.pool = 0; } this.pendingMana = null; }
     takeTurn(p, first) {
+      this.emptyPools();
       this.turn++;
       this.phase = 'untap';
       p.landsPlayed = 0; p.gyCastTypes = new Set(); p.pool = 0; p.spellsThisTurn = 0; p.nonArtifactSpells = 0; p.walkerUses = 0; p.silencedBy = null;
@@ -2905,13 +2918,16 @@
       this.mainPhase(p);
       if (p.lost || this.over) return;
       // combat
+      this.emptyPools();
       this.phase = 'combat';
       this.combat(p);
       if (p.lost || this.over) return;
+      this.emptyPools();
       this.phase = 'main 2';
       this.mainPhase(p, true);
       if (p.lost || this.over) return;
       // end step
+      this.emptyPools();
       this.phase = 'end';
       for (const q of this.alive()) for (const c of [...q.bf]) for (const e of c.info.endstep) {
         if (!e.each && q !== p) continue;
@@ -2977,7 +2993,7 @@
     }
 
     mainPhase(p, second = false) {
-      if (!second && p.drainMana) { p.pool = (p.pool || 0) + p.drainMana; this.emit('effect', `Mana Drain gives ${p.name} ${p.drainMana} extra mana.`, { seat: p.seat }); p.drainMana = 0; }
+      if (!second && p.drainMana) { this.addFloating(p, 'C', p.drainMana); this.emit('effect', `Mana Drain gives ${p.name} ${p.drainMana} extra mana.`, { seat: p.seat }); p.drainMana = 0; }
       this.playLand(p);
       let guard = 0;
       while (guard++ < 40 && !p.lost && !this.over) {
