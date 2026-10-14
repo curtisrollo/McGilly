@@ -65,7 +65,6 @@
 1x Rakdos Signet (ncc) 378 [Artifact]
 1x Ravages of War (j15) 4 *F* [Sorcery]
 1x Razaketh, the Foulblooded (hou) 73 [Creature]
-1x Redirect Lightning (tla) 151 [Instant]
 1x Reliquary Tower (c21) 311 [Land]
 1x Rogue's Passage (c21) 312 [Land]
 1x Rune-Scarred Demon (plst) IMA-106 [Creature]
