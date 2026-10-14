@@ -14,3 +14,7 @@ The simulator reads each card's rules text and models the common effects (mana, 
 commander tax and damage, removal, wipes, counterspells, draw, ramp, tutors, reanimation, tokens,
 anthems, life drain, planeswalkers). Each player is a simple heuristic AI, so treat results as a
 rough feel for the matchups rather than a precise win rate.
+
+Card art is generic: `src/art-map.json` maps creature types and card types to icons from
+[game-icons.net](https://game-icons.net) (CC BY 3.0, by Lorc, Delapouite and contributors), vendored in
+`vendor/game-icons-subset.json`.

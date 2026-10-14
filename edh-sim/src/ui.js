@@ -1,6 +1,32 @@
 (function () {
   'use strict';
-  const { decks, db } = window.POD_DATA;
+  const { decks, db, art } = window.POD_DATA;
+  const ART_COLOR = { W: 'var(--aW)', U: 'var(--aU)', B: 'var(--aB)', R: 'var(--aR)', G: 'var(--aG)', C: 'var(--aC)' };
+  // Pick a generic illustration from the card's creature type or card type (icons from game-icons.net)
+  function artName(m, id) {
+    const words = String(m.types || '').replace('—', ' ').split(/\s+/);
+    const nm = String(m.name || '');
+    for (const [sub, icon] of art.map.subtypes) if (words.includes(sub) || nm.startsWith(sub + ' ')) return icon;
+    const c = state.game && state.game.cards[id];
+    if (m.land) { for (const [t, icon] of art.map.lands) if (words.includes(t)) return icon; return 'mountains'; }
+    if (words.includes('Planeswalker')) return 'hooded-figure';
+    if (words.includes('Equipment')) return 'broadsword';
+    if (words.includes('Aura')) return 'aura';
+    if (words.includes('Saga')) return 'scroll-unfurled';
+    if (words.includes('Artifact') && c && c.info.mana) return 'gems';
+    for (const [t, icon] of art.map.types) if (words.includes(t)) return icon;
+    return 'cowled';
+  }
+  function artColor(colors) {
+    const cs = Array.isArray(colors) ? colors : String(colors || '').split(/\s+/).map((w) => ({ white: 'W', blue: 'U', black: 'B', red: 'R', green: 'G' }[w])).filter(Boolean);
+    if (!cs.length) return ART_COLOR.C;
+    if (cs.length > 1) return 'var(--aM)';
+    return ART_COLOR[cs[0]];
+  }
+  function artSvg(m, id) {
+    const body = art.icons[artName(m, id)] || '';
+    return `<svg class="art" viewBox="0 0 512 512" aria-hidden="true" style="color:${artColor(m.colors)}">${body}</svg>`;
+  }
   const { Game } = window.PodSim;
   const $ = (s, el = document) => el.querySelector(s);
   const MANA = { W: 'var(--mW)', U: 'var(--mU)', B: 'var(--mB)', R: 'var(--mR)', G: 'var(--mG)', C: 'var(--mC)' };
@@ -138,7 +164,7 @@
     const cls = ['c', b.tp ? 'tapped' : '', m.token ? 'token' : '', m.cmd ? 'cmd' : '', b.sk ? 'sick' : '', focus ? 'focus' : '', atk ? 'atk' : '', blk ? 'blk' : ''].join(' ');
     const ty = m.types.replace(/^Legendary /, '').split(' — ')[0];
     return `<button type="button" class="${cls}" style="--frame:${frameColor(m.colors)}" data-card="${b.id}" title="${esc(m.name)}">
-      <span class="n">${esc(m.name)}</span>${attachName ? `<span class="att">⚲ ${esc(attachName)}</span>` : ''}
+      <span class="n">${esc(m.name)}</span><span class="pic">${artSvg(m, b.id)}</span>${attachName ? `<span class="att">⚲ ${esc(attachName)}</span>` : ''}
       <span class="ty">${esc(ty)}</span>${b.ctr ? `<span class="ctr">+${b.ctr}</span>` : ''}${pt}</button>`;
   }
 
@@ -259,7 +285,7 @@
     el.hidden = false;
     el.style.setProperty('--frame', frameColor(m.colors));
     const cost = m.cost ? m.cost.split(' ').map((t) => `{${t}}`).join('') : '';
-    el.innerHTML = `<button type="button" class="x" aria-label="Close">×</button><h3>${esc(m.name)}</h3><div class="cost">${esc(cost)}</div><div class="tl">${esc(m.types)}${m.token ? ' · token' : ''}${m.cmd ? ' · commander' : ''}</div><p>${esc(m.text || '')}</p>${m.pt ? `<div class="ptl">${esc(m.pt)}</div>` : ''}`;
+    el.innerHTML = `<button type="button" class="x" aria-label="Close">×</button><div class="ipic">${artSvg(m, state.inspect)}</div><h3>${esc(m.name)}</h3><div class="cost">${esc(cost)}</div><div class="tl">${esc(m.types)}${m.token ? ' · token' : ''}${m.cmd ? ' · commander' : ''}</div><p>${esc(m.text || '')}</p>${m.pt ? `<div class="ptl">${esc(m.pt)}</div>` : ''}`;
   }
 
   // ---------- batch stats ----------

@@ -1,0 +1,26 @@
+{
+  "subtypes": [
+    ["Dragon", "dragon-head"], ["Drake", "dragon-breath"], ["Vampire", "vampire-dracula"], ["Angel", "angel-wings"],
+    ["Demon", "imp-laugh"], ["Goblin", "goblin-head"], ["Zombie", "shambling-zombie"], ["Faerie", "fairy"],
+    ["Squirrel", "squirrel"], ["Snake", "snake"], ["Serpent", "sea-serpent"], ["Pegasus", "pegasus"], ["Bird", "raven"],
+    ["Kraken", "kraken-tentacle"], ["Wurm", "worm-mouth"], ["Hydra", "hydra"], ["Pest", "ant"], ["Plant", "carnivorous-plant"],
+    ["Golem", "rock-golem"], ["Construct", "robot-golem"], ["Thopter", "flying-beetle"], ["Praetor", "crown"],
+    ["Phyrexian", "tentacles-skull"], ["Horror", "brain-tentacle"], ["Spirit", "ghost"], ["Elemental", "magic-swirl"],
+    ["Giant", "giant"], ["Frog", "frog"], ["Fish", "angler-fish"], ["Monkey", "monkey"], ["Elephant", "elephant"],
+    ["Fox", "fox-head"], ["Beast", "wolf-head"], ["Elk", "deer"], ["Satyr", "bull-horns"], ["Dryad", "holy-oak"], ["Nymph", "fairy-wings"],
+    ["God", "sun"], ["Avatar", "all-seeing-eye"], ["Archon", "griffin-symbol"], ["Lamia", "snake-tongue"], ["Illusion", "crystal-ball"],
+    ["Shapeshifter", "carnival-mask"], ["Gnome", "bad-gnome"], ["Pirate", "pirate-captain"], ["Merfolk", "trident"],
+    ["Elf", "woman-elf-face"], ["Knight", "black-knight-helm"], ["Soldier", "spartan-helmet"], ["Cleric", "sun-priest"],
+    ["Shaman", "cultist"], ["Druid", "oak-leaf"], ["Wizard", "wizard-face"], ["Warlock", "witch-face"], ["Artificer", "gears"],
+    ["Rogue", "hooded-assassin"], ["Monk", "monk-face"], ["Advisor", "scroll-unfurled"], ["Noble", "crown"], ["Warrior", "crossed-swords"],
+    ["Dauthi", "spectre"], ["Aetherborn", "aura"], ["Glimmer", "sparkles"], ["Halfling", "dwarf-face"], ["Kor", "hooded-figure"],
+    ["Ally", "hooded-figure"], ["Elder", "dragon-spiral"], ["Human", "cowled"],
+    ["Treasure", "coins"], ["Food", "shiny-apple"], ["Clue", "magnifying-glass"], ["Blood", "drop"]
+  ],
+  "types": [
+    ["Planeswalker", "hooded-figure"], ["Equipment", "broadsword"], ["Aura", "aura"], ["Saga", "scroll-unfurled"],
+    ["ManaRock", "gems"], ["Artifact", "glowing-artifact"], ["Enchantment", "spiral-bloom"], ["Instant", "lightning-branches"],
+    ["Sorcery", "spell-book"], ["Creature", "cowled"], ["Land", "mountains"]
+  ],
+  "lands": [["Plains", "sun"], ["Island", "big-wave"], ["Swamp", "swamp"], ["Mountain", "mountains"], ["Forest", "forest"]]
+}
