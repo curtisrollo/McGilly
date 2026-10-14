@@ -87,9 +87,12 @@
       if (e.key === ' ') { e.preventDefault(); togglePlay(); }
       if (e.key === 'ArrowRight') { pause(); go(state.idx + 1); }
       if (e.key === 'ArrowLeft') { pause(); go(state.idx - 1); }
-      if (e.key === 'Escape') { state.inspect = null; renderInspect(); }
+      if (e.key === 'Escape') { state.inspect = null; renderInspect(); $('#more').hidden = true; }
     });
     $('#runStats').addEventListener('click', runStats);
+    $('#openMore').addEventListener('click', () => { $('#more').hidden = false; });
+    $('#closeMore').addEventListener('click', () => { $('#more').hidden = true; });
+    $('#more').addEventListener('click', (e) => { if (e.target.id === 'more') $('#more').hidden = true; });
   }
 
   function seatDecks() { return state.seats.map((id) => decks.find((d) => d.id === id)); }
@@ -222,24 +225,25 @@
       const cmdDmg = Object.entries(s.cmdDmg).filter(([, v]) => v > 0).map(([k, v]) => `<span class="cmddmg" title="Commander damage from ${esc(nameOf(k))}">${esc(nameOf(k).split(',')[0])} <b>${v}</b>/21</span>`).join('');
       const lifeCls = ['life', s.life <= 10 ? 'low' : '', prevSnap && prevSnap.players[i].life > s.life ? 'flash-down' : '', prevSnap && prevSnap.players[i].life < s.life ? 'flash-up' : ''].join(' ');
       const tiles = (list) => list.length ? list.map((b) => cardTile(b, focus.has(b.id), atk.has(b.id), blk.has(b.id), b.at && byId[b.at] ? nameOf(b.at) : null)).join('') : '<span class="empty">none</span>';
-      const hand = state.showHands ? `<div class="hand"><div class="zone-label">Hand <i>${s.hand.length}</i></div><div class="cards">${s.hand.length ? s.hand.map((id) => cardTile({ id }, focus.has(id))).join('') : '<span class="empty">empty</span>'}</div></div>` : '';
-      const cmdZone = s.command.length ? `<div class="cards">${s.command.map((id) => cardTile({ id }, focus.has(id))).join('')}</div>` : '';
+      const hand = state.showHands ? `<div class="zone hand"><span class="zl">Hand ${s.hand.length}</span>${s.hand.length ? s.hand.map((id) => cardTile({ id }, focus.has(id))).join('') : '<span class="empty">empty</span>'}</div>` : '';
+      const cmdTiles = s.command.map((id) => cardTile({ id }, focus.has(id))).join('');
       const status = s.lost ? `<span class="badge out" title="${esc(s.lostReason)}">Out</span>` : isWinner ? '<span class="badge win">Winner</span>' : '';
-      return `<section class="${cls}" aria-label="${esc(p.name)}">
+      return `<section class="${cls} pos${i}" aria-label="${esc(p.name)}">
         <div class="seat-head">
           <div class="pips">${colors.map((c) => `<span class="pip" style="background:${MANA[c]}"></span>`).join('')}</div>
           <div class="seat-name"><b>${esc(d.name)}</b><small>${esc(d.commander)}</small></div>
+          <div class="stats"><span>Hand <b>${s.hand.length}</b></span><span>Lib <b>${s.lib}</b></span><span>GY <b>${s.gy.length}</b></span>${s.tax ? `<span>Tax <b>+${s.tax * 2}</b></span>` : ''}${s.poison ? `<span class="cmddmg">Poison <b>${s.poison}</b></span>` : ''}${cmdDmg}</div>
           ${status}
           <div class="${lifeCls}" aria-label="Life ${s.life}">${s.life}</div>
         </div>
-        <div class="stats"><span>Hand <b>${s.hand.length}</b></span><span>Library <b>${s.lib}</b></span><span>Graveyard <b>${s.gy.length}</b></span>${s.tax ? `<span>Tax <b>+${s.tax * 2}</b></span>` : ''}${s.poison ? `<span class="cmddmg">Poison <b>${s.poison}</b>/10</span>` : ''}${cmdDmg}</div>
-        ${cmdZone ? `<div><div class="zone-label">Command zone</div>${cmdZone}</div>` : ''}
-        <div><div class="zone-label">Creatures <i>${creatures.length}</i></div><div class="cards">${tiles(creatures)}</div></div>
-        <div><div class="zone-label">Other permanents <i>${others.length}</i></div><div class="cards">${tiles(others)}</div></div>
-        <div><div class="zone-label">Lands <i>${lands.length}</i></div><div class="lands">${lands.length ? landChips(lands, focus) : '<span class="empty">none</span>'}</div></div>
-        ${hand}
+        <div class="seat-body">
+          <div class="zone">${cmdTiles ? `<span class="zl">Command</span>${cmdTiles}` : ''}<span class="zl">Creatures ${creatures.length}</span>${creatures.length ? tiles(creatures) : '<span class="empty">none</span>'}</div>
+          ${others.length ? `<div class="zone"><span class="zl">Other ${others.length}</span>${tiles(others)}</div>` : ''}
+          <div class="lands"><span class="zl">Lands ${lands.length}</span>${lands.length ? landChips(lands, focus) : '<span class="empty">none</span>'}</div>
+          ${hand}
+        </div>
       </section>`;
-    }).join('');
+    }).join('') + `<div class="spin" aria-hidden="true" title="Turn order goes clockwise"><svg viewBox="0 0 48 48"><path d="M24 6a18 18 0 1 1-16.6 11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M3 10l4.6 8.4L16 14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
   }
 
   // The play-by-play only lists what has already happened, so it never spoils the game

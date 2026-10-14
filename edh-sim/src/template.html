@@ -5,34 +5,38 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Marcellus+SC&family=Source+Sans+3:wght@400;600&display=swap">
 <style>/*STYLE*/</style>
 <div class="wrap">
-  <header class="top">
-    <div class="brand"><h1>Pod Night</h1><span>Four-player Commander, simulated</span></div>
+  <header class="topbar" role="toolbar" aria-label="Playback">
+    <h1>Pod Night</h1>
     <div class="seats" id="seats"></div>
-  </header>
-  <div class="controls" role="toolbar" aria-label="Playback">
     <button type="button" class="btn primary" id="new">Deal new game</button>
     <button type="button" class="btn" id="play"></button>
     <button type="button" class="btn" id="back" aria-label="Previous step">‹</button>
     <button type="button" class="btn" id="fwd" aria-label="Next step">›</button>
     <button type="button" class="btn" id="nextTurn">Next turn</button>
-    <button type="button" class="btn" id="end">Skip to end</button>
+    <button type="button" class="btn" id="end">End</button>
     <div class="speed" id="speed" aria-label="Speed"></div>
     <div class="timeline"><input type="range" id="scrub" min="0" max="0" value="0" aria-label="Game timeline"><span class="pos" id="pos"></span></div>
-    <label class="chk"><input type="checkbox" id="hands"> Show hands</label>
+    <label class="chk"><input type="checkbox" id="hands"> Hands</label>
     <label class="chk">Seed <input type="number" id="seed" min="0"></label>
-  </div>
+    <button type="button" class="btn" id="openMore">Head to head · About</button>
+  </header>
   <div class="now" id="now" aria-live="polite"></div>
   <div class="main">
     <div class="table" id="table"></div>
     <aside class="log"><h2>Play-by-play</h2><ol id="log"></ol></aside>
   </div>
-  <section class="stats-panel">
-    <h2>Head to head</h2>
-    <p>Run 100 games with the four decks above, without animation, and count who wins.</p>
-    <div><button type="button" class="btn primary" id="runStats">Run 100 games</button></div>
-    <div id="statsOut"></div>
-  </section>
-  <p class="note"><b>How it plays.</b> Every one of the 449 different cards in these decks has its rules text handled: a general parser covers the common patterns, and the rest have their own scripts. That includes the combos: Sanguine Bond, Vito, Dina or Enduring Tenacity with Exquisite Blood or Bloodthirsty Conqueror; Basalt Monolith with Rings of Brighthearth into Staff of Domination, Aetherflux Reservoir or Walking Ballista; Karn with Mycosynth Lattice; and death-trigger drains with sacrifice outlets. Effects that multiply each other stack the way they should: token and counter doublers, Fiery Emancipation and Gisela, Terror of the Peaks with Dragon tokens, extra combats with Kaalia. Each player is a heuristic AI. It sees the board, plays to win and holds up counterspells and protection, but it won't find every line a strong human would. Click any card to read it. Space plays and pauses, and the arrow keys step through the game. Card data comes from the open-source Forge project. Card art is generic, picked by creature or card type, using icons by the artists at <a href="https://game-icons.net" target="_blank" rel="noopener">game-icons.net</a> (CC BY 3.0). Decks: /*DECKCOUNT*/.</p>
+</div>
+<div class="drawer" id="more" hidden>
+  <div class="drawer-box" role="dialog" aria-label="Head to head and notes">
+    <button type="button" class="x" id="closeMore" aria-label="Close">×</button>
+    <section class="stats-panel">
+      <h2>Head to head</h2>
+      <p>Run 100 games with the four decks in the seats, without animation, and count who wins.</p>
+      <div><button type="button" class="btn primary" id="runStats">Run 100 games</button></div>
+      <div id="statsOut"></div>
+    </section>
+    <p class="note"><b>How it plays.</b> Every one of the 449 different cards in these decks has its rules text handled: a general parser covers the common patterns, and the rest have their own scripts. That includes the combos: Sanguine Bond, Vito, Dina or Enduring Tenacity with Exquisite Blood or Bloodthirsty Conqueror; Basalt Monolith with Rings of Brighthearth into Staff of Domination, Aetherflux Reservoir or Walking Ballista; Karn with Mycosynth Lattice; and death-trigger drains with sacrifice outlets. Effects that multiply each other stack the way they should: token and counter doublers, Fiery Emancipation and Gisela, Terror of the Peaks with Dragon tokens, extra combats with Kaalia. Each player is a heuristic AI. It sees the board, plays to win and holds up counterspells and protection, but it won't find every line a strong human would. Click any card to read it. Space plays and pauses, and the arrow keys step through the game. Card data comes from the open-source Forge project. Card art is generic, picked by creature or card type, using icons by the artists at <a href="https://game-icons.net" target="_blank" rel="noopener">game-icons.net</a> (CC BY 3.0). Decks: /*DECKCOUNT*/.</p>
+  </div>
 </div>
 <div class="inspect" id="inspect" hidden></div>
 <script>window.POD_DATA = /*DATA*/;</script>

@@ -163,3 +163,69 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
 @media (max-width: 1180px) { .main { grid-template-columns: minmax(0, 1fr); } .log { position: static; max-height: 360px; } }
 @media (max-width: 760px) { .table { grid-template-columns: minmax(0, 1fr); } .c { width: 80px; } .brand h1 { font-size: 24px; } .bar-row { grid-template-columns: 90px minmax(0, 1fr) 92px; } }
 @media (prefers-reduced-motion: reduce) { .c, .life, .seat { transition: none; animation: none !important; } }
+
+/* ---------- one-screen layout ---------- */
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; background: var(--rail); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+.topbar h1 { font-family: var(--font-display); font-weight: 400; font-size: 22px; letter-spacing: .04em; margin: 0 6px 0 0; color: var(--brass); white-space: nowrap; }
+.topbar .seats { display: flex; gap: 4px; }
+.topbar .seats label { font-size: 0; gap: 0; }
+.topbar .seats select { padding: 4px 6px; font-size: 12px; }
+.topbar .btn { padding: 4px 9px; font-size: 13px; }
+.topbar .timeline { flex: 1 1 140px; }
+.topbar .chk { font-size: 12px; }
+.topbar input[type=number] { width: 88px; padding: 4px 6px; font-size: 12px; }
+.now { min-height: 0; padding: 4px 12px; gap: 10px; }
+.now .turn { font-size: 16px; }
+.now .txt { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.seat { padding: 8px 10px; gap: 6px; }
+.seat-head { gap: 8px; }
+.seat-name { flex: 0 1 auto; }
+.seat-name b { font-size: 16px; }
+.seat-name small { font-size: 11px; }
+.seat-head .stats { flex: 1; font-size: 11px; gap: 2px 10px; min-width: 0; }
+.life { font-size: 26px; }
+.seat-body { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+.zone, .seat-body .lands { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px; }
+.zl { font-size: 9px; text-transform: uppercase; letter-spacing: .1em; color: var(--brass-dim); writing-mode: vertical-rl; transform: rotate(180deg); align-self: stretch; text-align: center; padding: 2px 0; border-left: 1px solid var(--line); margin-left: 2px; }
+.seat-body .lands .zl { writing-mode: horizontal-tb; transform: none; border: 0; align-self: center; margin-right: 2px; }
+.zone .empty { align-self: center; }
+.c { width: 70px; min-height: 76px; padding: 2px 4px 3px; border-top-width: 3px; }
+.c .n { font-size: 10px; }
+.c .pic { height: 24px; }
+.c .pic .art { width: 20px; height: 20px; }
+.c .ty { font-size: 8.5px; }
+.c .pt { font-size: 10px; }
+.c .att { top: 34px; }
+.hand .c { width: 62px; min-height: 58px; }
+.hand .c .pic { height: 16px; }
+.hand .c .pic .art { width: 13px; height: 13px; }
+.land { font-size: 10.5px; padding: 1px 6px; }
+
+.drawer { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.drawer-box { position: relative; background: var(--felt); border: 1px solid var(--line); border-radius: 12px; padding: 16px; width: min(760px, 100%); max-height: 100%; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.drawer .x { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--muted); font-size: 22px; cursor: pointer; }
+
+@media (min-width: 1000px) and (min-height: 560px) {
+  html, body { height: 100%; overflow: hidden; }
+  .wrap { height: 100%; max-width: none; padding-block: 8px; gap: 6px; }
+  .main { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .table { height: 100%; min-height: 0; grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .seat { min-height: 0; overflow: hidden; }
+  .seat-body { overflow-y: auto; flex: 1; scrollbar-width: thin; }
+  .log { position: static; height: 100%; max-height: none; }
+}
+@media (min-width: 1000px) and (max-width: 1180px) { .main { grid-template-columns: minmax(0, 1fr) 240px; } .log { max-height: none; } }
+
+/* seats go clockwise around the table so turn order reads as a circle */
+.table { position: relative; }
+.spin { display: none; }
+@media (min-width: 761px) {
+  .seat.pos0 { grid-area: 1 / 1; } .seat.pos1 { grid-area: 1 / 2; } .seat.pos2 { grid-area: 2 / 2; } .seat.pos3 { grid-area: 2 / 1; }
+  .spin { display: flex; position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; background: var(--felt); border: 1px solid var(--brass-dim); color: var(--brass); align-items: center; justify-content: center; z-index: 2; pointer-events: none; }
+  .spin svg { width: 22px; height: 22px; }
+}
+
+.drawer[hidden] { display: none; }
+
+.topbar, .now { flex-shrink: 0; }
