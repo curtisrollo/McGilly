@@ -1,0 +1,40 @@
+<title>Pod Night</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Marcellus+SC&family=Source+Sans+3:wght@400;600&display=swap">
+<style>/*STYLE*/</style>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><h1>Pod Night</h1><span>Four-player Commander, simulated</span></div>
+    <div class="seats" id="seats"></div>
+  </header>
+  <div class="controls" role="toolbar" aria-label="Playback">
+    <button type="button" class="btn primary" id="new">Deal new game</button>
+    <button type="button" class="btn" id="play"></button>
+    <button type="button" class="btn" id="back" aria-label="Previous step">‹</button>
+    <button type="button" class="btn" id="fwd" aria-label="Next step">›</button>
+    <button type="button" class="btn" id="nextTurn">Next turn</button>
+    <button type="button" class="btn" id="end">Skip to end</button>
+    <div class="speed" id="speed" aria-label="Speed"></div>
+    <div class="timeline"><input type="range" id="scrub" min="0" max="0" value="0" aria-label="Game timeline"><span class="pos" id="pos"></span></div>
+    <label class="chk"><input type="checkbox" id="hands"> Show hands</label>
+    <label class="chk">Seed <input type="number" id="seed" min="0"></label>
+  </div>
+  <div class="now" id="now" aria-live="polite"></div>
+  <div class="main">
+    <div class="table" id="table"></div>
+    <aside class="log"><h2>Play-by-play</h2><ol id="log"></ol></aside>
+  </div>
+  <section class="stats-panel">
+    <h2>Head to head</h2>
+    <p>Run 100 games with the four decks above, without animation, and count who wins.</p>
+    <div><button type="button" class="btn primary" id="runStats">Run 100 games</button></div>
+    <div id="statsOut"></div>
+  </section>
+  <p class="note"><b>How it plays.</b> Each card's real rules text is read and the common effects are modelled: mana and colours, creatures and combat keywords, commander tax and 21 commander damage, removal, board wipes, counterspells, protection spells, card draw, ramp, tutors, reanimation, tokens, anthems, life drain, the Sanguine Bond + Exquisite Blood loop, and planeswalker abilities. Every player is a simple AI. Cards it can't model (most combo engines and copy effects) still get cast but do nothing. Click any card to read it. Space plays and pauses; the arrow keys step. Card data comes from the open-source Forge project. Decks: /*DECKCOUNT*/.</p>
+</div>
+<div class="inspect" id="inspect" hidden></div>
+<script>window.POD_DATA = /*DATA*/;</script>
+<script>/*ENGINE*/</script>
+<script>/*UI*/</script>
