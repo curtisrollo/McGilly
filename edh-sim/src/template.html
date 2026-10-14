@@ -35,6 +35,12 @@
       <div><button type="button" class="btn primary" id="runStats">Run 100 games</button></div>
       <div id="statsOut"></div>
     </section>
+    <section class="stats-panel" id="checks">
+      <h2>Card checks</h2>
+      <p id="checkSummary"></p>
+      <input type="search" id="checkFilter" placeholder="Filter by card name" aria-label="Filter card checks">
+      <div class="checks" id="checkList"></div>
+    </section>
     <p class="note"><b>How it plays.</b> Every one of the 449 different cards in these decks has its rules text handled: a general parser covers the common patterns, and the rest have their own scripts. That includes the combos: Sanguine Bond, Vito, Dina or Enduring Tenacity with Exquisite Blood or Bloodthirsty Conqueror; Basalt Monolith with Rings of Brighthearth into Staff of Domination, Aetherflux Reservoir or Walking Ballista; Karn with Mycosynth Lattice; and death-trigger drains with sacrifice outlets. Effects that multiply each other stack the way they should: token and counter doublers, Fiery Emancipation and Gisela, Terror of the Peaks with Dragon tokens, extra combats with Kaalia. Each player is a heuristic AI. It sees the board, plays to win and holds up counterspells and protection, but it won't find every line a strong human would. Click any card to read it. Space plays and pauses, and the arrow keys step through the game. Card data comes from the open-source Forge project. Card art is generic, picked by creature or card type, using icons by the artists at <a href="https://game-icons.net" target="_blank" rel="noopener">game-icons.net</a> (CC BY 3.0). Decks: /*DECKCOUNT*/.</p>
   </div>
 </div>

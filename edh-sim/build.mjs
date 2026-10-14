@@ -20,7 +20,9 @@ const decks = files.map((id) => {
 const used = new Set(decks.flatMap((d) => [d.commander, ...d.cards.map((c) => c.name)]));
 const slim = Object.fromEntries(Object.entries(db).filter(([k]) => used.has(k)));
 const art = { map: JSON.parse(read('src/art-map.json')), icons: JSON.parse(read('vendor/game-icons-subset.json')).icons };
-const data = JSON.stringify({ decks, db: slim, art }).replace(/</g, '\\u003c');
+const vpath = path.join(ROOT, 'data', 'validation.json');
+const validation = fs.existsSync(vpath) ? (({ when, checks, cards, passed, failed, results }) => ({ when, checks, cards, passed, failed, results: results.map((r) => [r.card, r.test, r.ok ? 1 : 0]) }))(JSON.parse(fs.readFileSync(vpath, 'utf8'))) : null;
+const data = JSON.stringify({ decks, db: slim, art, validation }).replace(/</g, '\\u003c');
 const html = read('src/template.html')
   .replace('/*STYLE*/', () => read('src/style.css'))
   .replace('/*DATA*/', () => data)

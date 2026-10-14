@@ -6,6 +6,9 @@ A web page that plays out simulated four-player Commander (EDH) games so you can
 - `fetch-cards.mjs` — downloads rules data for every card in `decks/` from the open-source [Forge](https://github.com/Card-Forge/forge) card scripts into `data/cards.json`.
 - `build.mjs` — bundles the engine, UI, card data and decks into a single page, `dist/pod-night.html`.
 - `test-sim.mjs` — runs games headlessly and prints win counts (`node test-sim.mjs 300`).
+- `validate.mjs` — effect validation: puts every card into a scripted game, makes each effect and trigger happen and
+  checks the game changed the way the card says (`node validate.mjs --json data/validation.json`; results show on the page).
+- `crosscheck.mjs` — checks each card's rules text against the effects the engine extracted (draw, destroy, create, search…).
 - `audit.mjs` — lists any card rules text the engine does not handle (currently none); `dump.mjs` prints what the engine understood for each card.
 
 To add or change a deck: drop the list into `decks/`, then run `node fetch-cards.mjs && node build.mjs`.

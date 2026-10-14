@@ -254,3 +254,32 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
 .zone-cards { gap: 6px; }
 #zoneView .drawer-box { width: min(900px, 100%); }
 @media (prefers-reduced-motion: reduce) { .mp.fresh, .mp.float { animation: none; } }
+
+/* effects on permanents that something just happened to */
+.c.fx-enter { animation: fxEnter .55s cubic-bezier(.2,.9,.3,1.3) both; }
+.c.fx-buff { animation: fxBuff 1.1s ease-out both; }
+.c.fx-hurt { animation: fxHurt .6s ease-in-out both; }
+.c.fx-morph { animation: fxMorph .9s ease-in-out both; }
+.c.fx-touch { animation: fxTouch .9s ease-out both; }
+.c.ghost { pointer-events: none; }
+.c.fx-leave { animation: fxLeave 1.1s ease-in both; }
+.c.tapped.fx-buff, .c.tapped.fx-hurt, .c.tapped.fx-touch, .c.tapped.fx-morph { rotate: 9deg; }
+@keyframes fxEnter { 0% { transform: translateY(-14px) scale(.6); opacity: 0; box-shadow: 0 0 0 3px #fff8; } 100% { transform: none; opacity: 1; } }
+@keyframes fxBuff { 0% { box-shadow: 0 0 0 3px #6fe39a, 0 0 22px #6fe39a; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@keyframes fxHurt { 0%, 100% { translate: 0; } 15% { translate: -4px 0; box-shadow: 0 0 0 3px #ff5a43, 0 0 20px #ff5a43; } 35% { translate: 4px 0; } 55% { translate: -3px 0; } 75% { translate: 2px 0; } }
+@keyframes fxMorph { 0% { filter: hue-rotate(0) brightness(1.6); transform: rotateY(90deg); } 100% { filter: none; transform: none; } }
+@keyframes fxTouch { 0% { box-shadow: 0 0 0 3px #b9a0ff, 0 0 20px #b9a0ff; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@keyframes fxLeave { 0% { opacity: .95; filter: grayscale(0); } 60% { opacity: .5; filter: grayscale(1) blur(.5px); transform: translateY(4px) scale(.92); } 100% { opacity: 0; transform: translateY(10px) scale(.8); } }
+.fxl { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); font: 700 12px/1 var(--font-num); padding: 2px 5px; border-radius: 4px; white-space: nowrap; pointer-events: none; animation: fxFloat 1.4s ease-out both; z-index: 3; }
+.fxl.up { background: #1f7a43; color: #fff; } .fxl.down { background: #b2321e; color: #fff; } .fxl:not(.up):not(.down) { background: #3b2f6b; color: #fff; }
+@keyframes fxFloat { 0% { opacity: 0; translate: 0 8px; } 15% { opacity: 1; translate: 0 0; } 75% { opacity: 1; } 100% { opacity: 0; translate: 0 -16px; } }
+@media (prefers-reduced-motion: reduce) { .c.fx-enter, .c.fx-buff, .c.fx-hurt, .c.fx-morph, .c.fx-touch, .c.fx-leave, .fxl { animation-duration: 1ms; } }
+
+#checkFilter { background: var(--rail); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; color: var(--ink); width: min(320px, 100%); }
+.checks { max-height: 320px; overflow: auto; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.chk-row { display: grid; grid-template-columns: minmax(120px, 210px) minmax(0, 1fr); gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.chk-card { color: var(--ink); font-weight: 600; }
+.chk-tests { display: flex; flex-wrap: wrap; gap: 2px 10px; color: var(--muted); }
+.chk-tests .pass::first-letter { color: #6fe39a; } .chk-tests .fail { color: var(--attack); }
+#checkSummary code { font-family: var(--font-num); font-size: 12px; background: var(--rail); padding: 1px 4px; border-radius: 3px; }
+#checkSummary .bad { color: var(--attack); }
