@@ -41,8 +41,8 @@
     $('#nextTurn').addEventListener('click', () => { pause(); jumpTurn(1); });
     $('#end').addEventListener('click', () => { pause(); go(state.events.length - 1); });
     $('#scrub').addEventListener('input', (e) => { pause(); go(+e.target.value); });
-    $('#hands').checked = state.showHands = load('hands', false);
-    $('#hands').addEventListener('change', (e) => { state.showHands = e.target.checked; save('hands', state.showHands); render(); });
+    $('#hands').checked = state.showHands = load('showHands', true);
+    $('#hands').addEventListener('change', (e) => { state.showHands = e.target.checked; save('showHands', state.showHands); render(); });
     state.speed = load('speed', 1);
     const sp = $('#speed');
     sp.innerHTML = SPEEDS.map((s) => `<button type="button" data-s="${s}" aria-pressed="${s === state.speed}">${s}×</button>`).join('');
@@ -81,7 +81,7 @@
     state.game = g;
     state.events = g.events;
     state.meta = {};
-    for (const id in g.cards) state.meta[id] = g.cardMeta(g.cards[id]);
+    for (const id in g.cards) state.meta[id] = (g.metaSeen && g.metaSeen[id]) || g.cardMeta(g.cards[id]);
     state.idx = 0;
     state.inspect = null;
     const scrub = $('#scrub'); scrub.max = state.events.length - 1; scrub.value = 0;
@@ -125,8 +125,9 @@
 
   // ---------- rendering ----------
   function cardTile(b, focus, atk, blk, attachName) {
-    const m = state.meta[b.id];
-    if (!m) return '';
+    const m0 = state.meta[b.id];
+    if (!m0) return '';
+    const m = b.nm ? { ...m0, name: b.nm } : m0;
     const base = m.pt ? m.pt.split('/').map((x) => parseInt(x)) : null;
     let pt = '';
     if (b.l != null) pt = `<span class="pt loy">${b.l}</span>`;
@@ -176,7 +177,7 @@
     now.className = 'now k-' + ev.kind;
     const seatName = ev.seat != null ? g.players[ev.seat].name : '';
     now.innerHTML = `<span class="turn">${ev.turn ? 'Turn ' + ev.turn : 'Setup'}</span>${ev.phase && ev.turn ? `<span class="phase">${esc(g.players[ev.active].name)} · ${esc(ev.phase)}</span>` : ''}<span class="txt">${esc(ev.text)}</span>`;
-    $('#pos').textContent = `${state.idx + 1} / ${state.events.length}`;
+    $("#pos").textContent = `step ${state.idx + 1}`;
     const finalEv = state.events[state.events.length - 1];
     const table = $('#table');
     table.innerHTML = g.players.map((p, i) => {
@@ -186,9 +187,10 @@
       const isWinner = ev.kind === 'win' && g.winner === i;
       const cls = ['seat', ev.active === i && ev.turn ? 'active' : '', snap.target === i && (ev.kind === 'attack' || ev.kind === 'block' || ev.kind === 'damage') ? 'targeted' : '', s.lost ? 'dead' : '', isWinner ? 'winner' : ''].join(' ');
       const bf = s.bf.filter((b) => state.meta[b.id]);
-      const lands = bf.filter((b) => state.meta[b.id].land);
-      const creatures = bf.filter((b) => state.meta[b.id].creature && !state.meta[b.id].land);
-      const others = bf.filter((b) => !state.meta[b.id].land && !state.meta[b.id].creature);
+      const isCr = (b) => (b.cr != null ? !!b.cr : state.meta[b.id].creature);
+      const lands = bf.filter((b) => state.meta[b.id].land && !isCr(b));
+      const creatures = bf.filter((b) => isCr(b));
+      const others = bf.filter((b) => !state.meta[b.id].land && !isCr(b));
       const byId = Object.fromEntries(bf.map((b) => [b.id, b]));
       const nameOf = (id) => (state.meta[id] ? state.meta[id].name : '');
       const cmdDmg = Object.entries(s.cmdDmg).filter(([, v]) => v > 0).map(([k, v]) => `<span class="cmddmg" title="Commander damage from ${esc(nameOf(k))}">${esc(nameOf(k).split(',')[0])} <b>${v}</b>/21</span>`).join('');
@@ -196,7 +198,7 @@
       const tiles = (list) => list.length ? list.map((b) => cardTile(b, focus.has(b.id), atk.has(b.id), blk.has(b.id), b.at && byId[b.at] ? nameOf(b.at) : null)).join('') : '<span class="empty">none</span>';
       const hand = state.showHands ? `<div class="hand"><div class="zone-label">Hand <i>${s.hand.length}</i></div><div class="cards">${s.hand.length ? s.hand.map((id) => cardTile({ id }, focus.has(id))).join('') : '<span class="empty">empty</span>'}</div></div>` : '';
       const cmdZone = s.command.length ? `<div class="cards">${s.command.map((id) => cardTile({ id }, focus.has(id))).join('')}</div>` : '';
-      const status = s.lost ? `<span class="badge out" title="${esc(s.lostReason)}">Out</span>` : isWinner || (finalEv.kind === 'win' && g.winner === i && state.idx === state.events.length - 1) ? '<span class="badge win">Winner</span>' : '';
+      const status = s.lost ? `<span class="badge out" title="${esc(s.lostReason)}">Out</span>` : isWinner ? '<span class="badge win">Winner</span>' : '';
       return `<section class="${cls}" aria-label="${esc(p.name)}">
         <div class="seat-head">
           <div class="pips">${colors.map((c) => `<span class="pip" style="background:${MANA[c]}"></span>`).join('')}</div>
@@ -204,7 +206,7 @@
           ${status}
           <div class="${lifeCls}" aria-label="Life ${s.life}">${s.life}</div>
         </div>
-        <div class="stats"><span>Hand <b>${s.hand.length}</b></span><span>Library <b>${s.lib}</b></span><span>Graveyard <b>${s.gy.length}</b></span>${s.tax ? `<span>Tax <b>+${s.tax * 2}</b></span>` : ''}${cmdDmg}</div>
+        <div class="stats"><span>Hand <b>${s.hand.length}</b></span><span>Library <b>${s.lib}</b></span><span>Graveyard <b>${s.gy.length}</b></span>${s.tax ? `<span>Tax <b>+${s.tax * 2}</b></span>` : ''}${s.poison ? `<span class="cmddmg">Poison <b>${s.poison}</b>/10</span>` : ''}${cmdDmg}</div>
         ${cmdZone ? `<div><div class="zone-label">Command zone</div>${cmdZone}</div>` : ''}
         <div><div class="zone-label">Creatures <i>${creatures.length}</i></div><div class="cards">${tiles(creatures)}</div></div>
         <div><div class="zone-label">Other permanents <i>${others.length}</i></div><div class="cards">${tiles(others)}</div></div>
@@ -214,31 +216,45 @@
     }).join('');
   }
 
+  // The play-by-play only lists what has already happened, so it never spoils the game
+  function logItem(e, i) {
+    const sw = e.seat != null ? `<span class="sw" style="background:${seatSwatch(e.seat)}"></span>` : '';
+    return `<li data-i="${i}" class="k-${e.kind}">${e.kind === 'turn' ? '' : sw}${esc(e.text)}</li>`;
+  }
   function renderLog() {
-    const g = state.game;
-    $('#log').innerHTML = state.events.map((e, i) => {
-      if (e.kind === 'mulligan' || (e.kind === 'land' && false)) return '';
-      const sw = e.seat != null ? `<span class="sw" style="background:${seatSwatch(e.seat)}"></span>` : '';
-      return `<li data-i="${i}" class="k-${e.kind}">${e.kind === 'turn' ? '' : sw}${esc(e.text)}</li>`;
-    }).join('');
+    state.logShown = -1;
+    $('#log').innerHTML = '';
     markLog();
   }
   function seatSwatch(i) { const c = deckColors(seatDecks()[i]); return c.length === 1 ? MANA[c[0]] : 'var(--mM)'; }
   function markLog() {
     const log = $('#log');
+    if (state.idx < state.logShown) {
+      log.querySelectorAll('li').forEach((li) => { if (+li.dataset.i > state.idx) li.remove(); });
+      state.logShown = state.idx;
+    } else if (state.idx > state.logShown) {
+      let html = '';
+      for (let i = state.logShown + 1; i <= state.idx; i++) html += logItem(state.events[i], i);
+      log.insertAdjacentHTML('beforeend', html);
+      state.logShown = state.idx;
+    }
     const prev = log.querySelector('li.cur'); if (prev) prev.classList.remove('cur');
     let li = log.querySelector(`li[data-i="${state.idx}"]`);
     for (let i = state.idx; !li && i >= 0; i--) li = log.querySelector(`li[data-i="${i}"]`);
     if (li) {
       li.classList.add('cur');
-      const top = li.offsetTop - log.offsetTop - log.clientHeight / 2;
-      log.scrollTop = Math.max(0, top);
+      log.scrollTop = log.scrollHeight;
     }
   }
 
   function renderInspect() {
     const el = $('#inspect');
-    const m = state.inspect != null && state.meta[state.inspect];
+    let m = state.inspect != null && state.meta[state.inspect];
+    if (m) {
+      const ev = state.events[state.idx];
+      const live = ev && ev.snap.players.flatMap((x) => x.bf).find((b) => b.id === state.inspect);
+      if (live && live.nm) m = { ...m, name: live.nm, text: live.tx || m.text };
+    }
     if (!m) { el.hidden = true; return; }
     el.hidden = false;
     el.style.setProperty('--frame', frameColor(m.colors));
