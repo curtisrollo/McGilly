@@ -3271,6 +3271,7 @@
     }
 
     activateAbilities(p, postCombat) {
+      if (this.over || p.lost) return;
       const elixir = this.has(p, 'elixir');
       for (const c of [...p.bf]) {
         if (c.zone !== 'bf') continue;
@@ -3330,6 +3331,7 @@
 
     // Post-combat uses of leftover resources
     lateGameMana(p) {
+      if (this.over || p.lost) return;
       // Beledros: pay 10 life to untap lands when there is something big to cast
       const bel = p.bf.find((c) => c.info.beledros);
       if (bel && bel.usedTurn !== this.turn && p.life >= 22) {
