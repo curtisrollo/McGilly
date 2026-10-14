@@ -692,7 +692,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       }
       if ((m = low.match(/^at the beginning of (your|each) upkeep,\s*(.*)$/))) { a.upkeep.push({ each: m[1] === 'each', fx: PE(m[2]), lose: +((m[2].match(/you lose (\d+) life/) || [])[1] || 0) }); continue; }
       if ((m = low.match(/^at the beginning of (your|each) end step,\s*(.*)$/))) { a.endstep.push({ each: m[1] === 'each', fx: PE(m[2]) }); continue; }
-      if ((m = low.match(/^(?:eminence — )?whenever you cast (?:a|an|another) ?([a-z, ]*?) ?spell,\s*(.*)$/))) {
+      if ((m = low.match(/^(?:eminence — )?whenever you cast (?:another|an|a)\b ?([a-z, ]*?) ?spell,\s*(.*)$/))) {
         a.castTrig.push({ filter: m[1], another: /another/.test(low), fx: PE(m[2]), eminence: /command zone/.test(low) }); continue;
       }
       if (/^whenever another nontoken creature you control dies, you may exile it\. if you do, create a token that's a copy of that card, except it's an enchantment/.test(low)) { a.triggers.push({ k: 'myrkul' }); continue; }
@@ -3030,7 +3030,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
         else if (/colorless/.test(f)) ok = i.colors.size === 0;
         else if (!f.trim()) ok = true;
         else { const sub = cap(f.split(' ')[0]); ok = (i.subtypes || []).includes(sub); }
-        if (ok) this.resolveEffects(p, t.fx, s, null, true);
+        if (ok) { if (t.fx.some((f) => f.k === 'tokens')) this.emit('trigger', `${s.info.name} triggers off ${i.name}${s.zone === 'command' ? ' (from the command zone)' : ''}.`, { seat: p.seat, cards: [s.id] }); this.resolveEffects(p, t.fx, s, null, false); }
       }
       // opponents' Rhystic Study / Esper Sentinel
       for (const q of this.opps(p)) for (const s of q.bf) for (const t of s.info.triggers) {
