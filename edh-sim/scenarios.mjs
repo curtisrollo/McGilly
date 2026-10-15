@@ -360,4 +360,78 @@ export default [
       return { ok: !src, note: src ? 'made mana with nothing imprinted' : '' };
     },
   },
+  {
+    card: 'Hermit Druid', title: 'the AI uses it with Muldrotha out',
+    wrong: 'its ability was never judged worth using, so it never activated',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Muldrotha, the Gravetide'); const h = put(g, me, 'Hermit Druid');
+      return { ok: !!g.prepareAbility(me, h, h.info.activated[0], true), note: '' };
+    },
+  },
+  {
+    card: 'Sword of Feast and Famine', title: 'gives +2/+2 once and protection from black and green',
+    wrong: 'the bonus was applied twice (+4/+4) and the protection never stopped blockers',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; const c = put(g, me, 'Craterhoof Behemoth'); const sw = put(g, me, 'Sword of Feast and Famine'); sw.attached = c.id;
+      const blocker = put(g, opp, 'Birds of Paradise');
+      return { ok: g.power(c) === 7 && !g.canBlock(blocker, c), note: `power ${g.power(c)}, green Birds can block: ${g.canBlock(blocker, c)}` };
+    },
+  },
+  {
+    card: 'Sidisi, Brood Tyrant', title: 'any mill of a creature card from your library makes a Zombie, not only its own',
+    wrong: 'only Sidisi\'s own mill counted',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Sidisi, Brood Tyrant');
+      const cr = me.library.find((c) => c.info.isCreature); g.removeFrom(me.library, cr); me.library.unshift(cr);
+      const z0 = me.bf.filter((c) => c.token).length; g.mill(me, 2);
+      return { ok: me.bf.filter((c) => c.token).length === z0 + 1, note: `${me.bf.filter((c) => c.token).length - z0} Zombies` };
+    },
+  },
+  {
+    card: 'The Gitrog Monster', title: 'milling several lands at once draws one card',
+    wrong: 'it drew a card for each land',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'The Gitrog Monster');
+      const lands = me.library.filter((c) => c.info.isLand).slice(0, 3); for (const l of lands) { g.removeFrom(me.library, l); me.library.unshift(l); }
+      const h0 = me.hand.length; g.mill(me, 3);
+      return { ok: me.hand.length === h0 + 1, note: `drew ${me.hand.length - h0}` };
+    },
+  },
+  {
+    card: 'Glacial Chasm', title: 'sacrifices a land when it enters',
+    wrong: 'it entered for free',
+    run({ table, card }) {
+      const g = table(); const me = g.players[0]; const n0 = me.bf.filter((c) => c.info.isLand).length; const gc = card(g, me, 'Glacial Chasm', 'hand');
+      g.removeFrom(me.hand, gc); g.enterBattlefield(gc, me, {});
+      return { ok: me.bf.filter((c) => c.info.isLand).length === n0, note: `lands ${n0} -> ${me.bf.filter((c) => c.info.isLand).length}` };
+    },
+  },
+  {
+    card: 'Force of Negation', title: 'the spell it counters is exiled, and it costs no life',
+    wrong: 'the spell went to the graveyard and Force of Negation cost 1 life like Force of Will',
+    run({ table, put, card }) {
+      const g = table(); const [me, opp] = g.players; card(g, opp, 'Force of Negation', 'hand'); card(g, opp, 'Cyclonic Rift', 'hand');
+      const wipe = card(g, me, 'Damnation', 'hand'); for (const q of g.players.slice(1)) put(g, q, 'Craterhoof Behemoth');
+      const l0 = opp.life; g.R = Object.assign(() => 0, g.R); g.castSpell(me, wipe, 'hand');
+      return { ok: wipe.zone === 'exile' && opp.life === l0, note: `Damnation ${wipe.zone}, life ${l0} -> ${opp.life}` };
+    },
+  },
+  {
+    card: 'Jace, Wielder of Mysteries', title: '+1 mills first, then draws (so it can win off an empty library)',
+    wrong: 'it drew first and then milled',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const j = put(g, me, 'Jace, Wielder of Mysteries'); me.library = me.library.slice(0, 2);
+      g.resolveEffects(me, j.info.loyaltyAbs[0].fx, j, null, true);
+      return { ok: g.players.slice(1).every((q) => q.lost), note: g.players.slice(1).map((q) => q.lost).join('/') };
+    },
+  },
+  {
+    card: "Liliana, Death's Majesty", title: '-3 returns the creature as a Zombie in addition to its types',
+    wrong: 'it stayed a non-Zombie and died to her own -7',
+    run({ table, put, card }) {
+      const g = table(); const me = g.players[0]; const l = put(g, me, "Liliana, Death's Majesty"); me.gy = []; const c = card(g, me, 'Craterhoof Behemoth', 'gy');
+      g.resolveEffects(me, l.info.loyaltyAbs.find((x) => x.delta === -3).fx, l, null, true);
+      return { ok: c.zone === 'bf' && g.isType(c, 'Zombie'), note: `${c.zone}, zombie ${g.isType(c, 'Zombie')}` };
+    },
+  },
 ];
