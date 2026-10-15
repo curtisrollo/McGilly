@@ -3,7 +3,11 @@
 // fixed mistake can't quietly come back. Add one whenever a bug is found.
 // Each scenario: { card, title, wrong, run(t) } where run returns { ok, note } and t has the table helpers
 // (table, put, card, addLand, populate, Game, db, decks).
-export default [
+import muldrotha from './scenarios/muldrotha.mjs';
+import osgir from './scenarios/osgir.mjs';
+import myrkul from './scenarios/myrkul.mjs';
+import atraxa from './scenarios/atraxa.mjs';
+const core = [
   {
     card: 'Doubling Season', title: 'counters are doubled, not quadrupled',
     wrong: 'its token sentence also added a counter doubler, so counters came in at 4x',
@@ -786,3 +790,4 @@ export default [
     },
   },
 ];
+export default [...core, ...muldrotha, ...osgir, ...myrkul, ...atraxa];
