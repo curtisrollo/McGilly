@@ -2505,6 +2505,8 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
 
     // ----- battlefield entry -----
     enterBattlefield(c, p, o = {}) {
+      // a card is only ever in one place: take it out of whatever zone still holds it
+      for (const q of this.players) for (const z of ['hand', 'gy', 'exile', 'library', 'command']) if (q[z].includes(c)) this.removeFrom(q[z], c);
       c.zone = 'bf'; c.ctrl = p.seat; c.sick = true; c.tapped = !!o.tapped; c.dmg = 0;
       // copy effects choose what to copy as they enter
       if (c.info.copy && !c.copiedFrom) this.copyOnEnter(c, p);
@@ -3414,7 +3416,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
         }
         case 'removalN': { const n = X(fx.n) || 0; for (let i = 0; i < n; i++) this.resolveEffect(p, { k: 'removal', what: fx.what }, src, 0, quiet); break; }
         case 'extraLandNow': p.landsPlayed = Math.max(0, p.landsPlayed - 1); p.extraLandsGranted = (p.extraLandsTurn === this.turn ? p.extraLandsGranted || 0 : 0) + 1; p.extraLandsTurn = this.turn; break;
-        case 'putFromHand': { const put = p.hand.filter((c) => c.info.isPermanent && !c.info.isLand).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a)).slice(0, fx.n); for (const c of put) { this.removeFrom(p.hand, c); this.enterBattlefield(c, p, { quiet: true }); } if (put.length) this.emit('cast', `${name}: ${p.name} puts ${put.length} permanents onto the battlefield.`, { seat: p.seat, cards: put.map((c) => c.id) }); break; }
+        case 'putFromHand': { const put = p.hand.filter((c) => c.info.isPermanent && !c.info.isLand).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a)).slice(0, fx.n); for (const c of put) { if (c.zone !== 'hand' || !p.hand.includes(c)) continue; this.removeFrom(p.hand, c); this.enterBattlefield(c, p, { quiet: true }); } /* (one entering can make us discard another: Quicksmith Genius) */ if (put.length) this.emit('cast', `${name}: ${p.name} puts ${put.length} permanents onto the battlefield.`, { seat: p.seat, cards: put.map((c) => c.id) }); break; }
         case 'ragavan': { const q = this._combatDefender; if (q && q.library.length) { const c = q.library.shift(); c.ctrl = p.seat; c.zone = 'hand'; c.impulseTurn = this.turn; c.stolenFrom = q.seat; p.hand.push(c); this.emit('effect', `Ragavan exiles ${c.info.name} from ${q.name}'s library; ${p.name} may cast it this turn.`, { seat: p.seat, cards: [c.id] }); } break; }
         case 'vraskaShield': if (src) src.vraskaShield = p.seat; break;
         case 'coffin': if (src && src.zone === 'bf') { src.charge = (src.charge || 0) + 1; if (src.charge >= 3) { src.charge = 0; this.transform(src); } } break;
