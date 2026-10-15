@@ -754,7 +754,7 @@
     'Oswald Fiddlebender': (a, cover) => { a.statics = a.statics.filter((x) => x.k !== 'misc'); a.activated = [{ tap: true, sorcery: true, sacArtifact: 1, cost: parseCost('W'), fx: [{ k: 'search', n: 1, what: 'artifact', dest: 'bf', mvPlusOne: true }], text: 'Sacrifice an artifact: tutor one that costs 1 more onto the battlefield.' }]; cover(ALL); },
     'Palisade Giant': (a, cover) => { a.statics.push({ k: 'palisade' }); cover(ALL); },
     'Pattern of Rebirth': (a, cover) => { a.isAura = true; a.enchDies = [{ k: 'search', n: 1, what: 'creature', dest: 'bf' }]; cover(ALL); },
-    'Pir, Imaginative Rascal': (a, cover) => { a.statics.push({ k: 'counterPlus' }); cover(ALL); },
+    'Pir, Imaginative Rascal': (a, cover) => { a.statics.push({ k: 'counterPlus', allKinds: true }); cover(ALL); },
     'Primal Vigor': (a, cover) => { a.statics.push({ k: 'globalDouble' }); cover(ALL); },
     'Plaguecrafter': (a, cover) => { a.etb = [{ k: 'edictAll', n: 1, discardIfNone: true, pw: true }]; cover(ALL); },
     'Portal to Phyrexia': (a, cover) => { a.etb = [{ k: 'edict', n: 3 }]; cover(ALL); },
@@ -903,7 +903,7 @@
       this.nnSeats = opts.nnSeats || null;          // which seats let it steer their choices (default: all)
       this.collect = !!opts.collect;                // record training samples (state, card) for train.mjs
       this.explore = opts.explore || 0;             // random noise on choices while training, so the net sees variety
-      this.lookahead = opts.lookahead !== false;    // try the best few plays on a copy of the game before choosing (see lookPick)
+      this.lookahead = opts.lookahead !== false && !(typeof process !== 'undefined' && process.env && process.env.NOLOOK);    // try the best few plays on a copy of the game before choosing (see lookPick)
       this.lookSeats = opts.lookSeats || null;      // which seats search (default: all)
       this.samples = []; this.mullSamples = [];
     }
@@ -1525,7 +1525,8 @@
     counterAmount(p, n, kind = 'p1') {
       if (!n) return 0;
       n *= this.counterMult(p, kind);
-      if (kind === 'p1') n += this.statics(p, 'counterPlus').length;
+      // +1 per counter-adder (Pir adds to every kind, but not to loyalty put on as an ability's cost)
+      if (kind === 'p1') n += this.statics(p, 'counterPlus').length; else if (kind !== 'cost') n += this.statics(p, 'counterPlus').filter(({ s: st }) => st.allKinds).length;
       if (this.opps(p).some((q) => this.has(q, 'vorinclexHalf'))) n = Math.floor(n / 2);
       return n;
     }
@@ -3922,7 +3923,7 @@
       if (p.lost || (g.over && g.winner !== seat)) return -1000;
       const opps = g.opps(p);
       let v = (g.players.length - 1 - opps.length) * 60 + opps.reduce((a, q) => a + Math.min(40, 40 - q.life) * 0.5 + q.poison * 3 - g.playerThreat(q) * 0.15, 0);
-      v += g.playerThreat(p) * 0.6 + p.hand.length * 1.5 + (p.infMana ? 25 : 0) + Math.min(p.life, 40) * 0.2;
+      v += g.playerThreat(p) * 0.6 + p.hand.length * 1.5 + (p.infMana ? 25 : 0) + (opps.length && g.locked(opps[0]) ? 60 : 0) - (g.locked(p) ? 60 : 0) + Math.min(p.life, 40) * 0.2;
       if (g.nnOn(p)) v += 80 * g.nnV(p);
       return v;
     }
@@ -4445,7 +4446,7 @@
           else if (f.k === 'wipe' && f.what === 'big') { const big = (q) => q.bf.filter((x) => x.info.isCreature && this.power(x) >= 4).reduce((s2, x) => s2 + this.creatureValue(x) / (x.isCommander ? 2 : 1), 0); const v = this.opps(p).reduce((s2, q) => s2 + big(q), 0) - 1.5 * big(p); s += v >= 12 ? 10 + v / 3 : -10; } // Elspeth's -3
           else if (f.k === 'wipe') s += this.scoreCast(p, { info: { ...c.info, spell: [f], etb: [], isPermanent: false, isPW: false, mana: null, isCreature: false } }, 'hand') > 0 ? 14 : -10;
           else if (f.k === 'darettiWeld') { const fod = p.bf.some((x) => x.info.types.has('Artifact') && !x.isCommander && this.permValue(x) < 5); const best = Math.max(0, ...p.gy.filter((x) => x.info.types.has('Artifact') && x.info.isPermanent).map((x) => this.cardValue(p, x))); s += fod && best >= 6 ? 6 + best : -10; }
-          else if (f.k === 'draw' && (f.n || 1) >= p.library.length) s -= 60; // drawing out the library loses the game
+          else if (f.k === 'draw' && (f.n || 1) >= p.library.length && !this.has(p, 'labman') && !this.has(p, 'platinum')) s -= 60; // drawing out the library loses the game (unless Jace or Platinum Angel turns it around)
           else if (f.k === 'tokens') s += 5; else if (f.k === 'draw') s += 4; else if (f.k === 'drain') s += 4;
           else if (f.k === 'drawTapped') s += 4.5 * Math.max(0, ...this.alive().map((q) => q.bf.filter((x) => x.info.isCreature && x.tapped).length)); // Tamiyo, the Moon Sage's -2
           else if (f.k === 'counters' && f.on === 'each') s += 1.5 * p.bf.filter((x) => x.info.isCreature).length; // Ajani Steadfast's -2, with loyaltyEach below

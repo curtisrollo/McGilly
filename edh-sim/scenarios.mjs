@@ -211,11 +211,11 @@ const core = [
     },
   },
   {
-    card: 'Pir, Imaginative Rascal', title: 'adds one to +1/+1 counters only (not loyalty)',
-    wrong: 'it was read as a counter doubler',
+    card: 'Pir, Imaginative Rascal', title: 'adds one to every kind of counter put on by an effect, but not to a loyalty cost',
+    wrong: 'it was read as a counter doubler, then as +1/+1 counters only',
     run({ table, put }) {
       const g = table(); const me = g.players[0]; put(g, me, 'Pir, Imaginative Rascal');
-      return { ok: g.counterAmount(me, 2, 'p1') === 3 && g.counterAmount(me, 2, 'loyalty') === 2, note: `+1/+1: ${g.counterAmount(me, 2, 'p1')}, loyalty: ${g.counterAmount(me, 2, 'loyalty')}` };
+      return { ok: g.counterAmount(me, 2, 'p1') === 3 && g.counterAmount(me, 2, 'loyalty') === 3 && g.counterAmount(me, 1, 'cost') === 1, note: `+1/+1: ${g.counterAmount(me, 2, 'p1')}, loyalty: ${g.counterAmount(me, 2, 'loyalty')}, cost: ${g.counterAmount(me, 1, 'cost')}` };
     },
   },
   {

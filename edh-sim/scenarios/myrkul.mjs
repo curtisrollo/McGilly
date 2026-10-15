@@ -124,7 +124,7 @@ export default [
     card: 'Phyrexian Tower', title: 'can sacrifice a creature for {B}{B} the turn it enters (lands are not summoning sick)',
     wrong: 'a Tower that just entered was treated as summoning sick',
     run({ table, put, card }) {
-      const g = table(); const me = g.players[0]; me.bf = []; put(g, me, 'Birds of Paradise').token = true;
+      const g = table(); const me = g.players[0]; me.bf = []; g.addToken(me, { p: 1, t: 1, sub: 'Pest', colors: 'black green' }, 1, true);
       const t = card(g, me, 'Phyrexian Tower', 'hand'); g.removeFrom(me.hand, t); g.enterBattlefield(t, me, {});
       const src = g.sources(me).find((x) => x.c === t && x.fodder);
       return { ok: !!src, note: src ? '' : 'no fodder mana from the new Tower' };
