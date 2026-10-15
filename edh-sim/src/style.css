@@ -378,3 +378,4 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
 .bar.ab2 > div { height: 6px; border-radius: 3px; }
 .c .ctr.neg { background: #7a2b2b; }
 .c .chg { position: absolute; left: 3px; bottom: 15px; font-family: var(--font-num); font-size: 10px; background: #2b4f7a; color: #fff; border-radius: 3px; padding: 0 3px; }
+.chk-tests .scen em { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); margin: 0 0 3px 14px; }

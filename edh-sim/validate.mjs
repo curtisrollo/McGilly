@@ -56,7 +56,7 @@ function populate(g) {
   for (let i = 0; i < 3; i++) card(g, me, 'Forest', 'hand');
   card(g, me, 'Craterhoof Behemoth', 'hand'); card(g, me, 'Falkenrath Noble', 'hand');
   for (const q of opps) {
-    put(g, q, 'Craterhoof Behemoth'); put(g, q, 'Birds of Paradise'); put(g, q, 'Sol Ring'); put(g, q, 'Exploration');
+    put(g, q, 'Craterhoof Behemoth'); put(g, q, 'Birds of Paradise').tapped = true; put(g, q, 'Sol Ring'); put(g, q, 'Exploration'); // (the tapped Birds is for Tamiyo's -2 and the Wandering Emperor's -2)
     put(g, q, 'Jace, the Mind Sculptor');
     for (const n of ['Craterhoof Behemoth', 'Sol Ring']) card(g, q, n, 'gy');
     for (let i = 0; i < 3; i++) card(g, q, 'Forest', 'hand');
@@ -452,6 +452,7 @@ scen('combat', 'a big creature does not attack into an untapped deathtouch block
 for (const sc of SCENARIOS) {
   if (only && only !== sc.card) continue;
   staticCheck(sc.card, sc.title, () => { const r = sc.run({ table, put, card, addLand, populate, Game, db, decks }); return { ...r, note: (r.ok ? '' : `was wrong before: ${sc.wrong}. `) + (r.note || '') }; });
+  results[results.length - 1].wrong = sc.wrong;
 }
 
 // ---------- report ----------

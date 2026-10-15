@@ -416,11 +416,11 @@
   function renderChecks() {
     const v = window.POD_DATA.validation;
     if (!v) { $('#checkSummary').textContent = 'No validation results in this build.'; return; }
-    $('#checkSummary').innerHTML = `Every card is put into a scripted game and each of its effects and triggers is made to happen; the check passes when the game changes the way the card says. Last run: <b>${v.passed}</b> of <b>${v.checks}</b> checks passed across <b>${v.cards}</b> cards with effects${v.failed ? `, <b class="bad">${v.failed} failed</b>` : ''}. Lands with only mana abilities and vanilla creatures have nothing to check. Run it yourself with <code>node validate.mjs</code>.`;
+    $('#checkSummary').innerHTML = `Every card is put into a scripted game and each of its effects and triggers is made to happen; the check passes when the game changes the way the card says. Last run: <b>${v.passed}</b> of <b>${v.checks}</b> checks passed across <b>${v.cards}</b> cards with effects${v.failed ? `, <b class="bad">${v.failed} failed</b>` : ''}. Lands with only mana abilities and vanilla creatures have nothing to check. Run it yourself with <code>node validate.mjs</code>.<br><b>Rules scenarios.</b> ${v.results.filter((r) => r[3]).length} of these are situations the engine once got wrong, each with what it used to do (marked "used to") and the correct result it must now produce. Every bug found becomes one, and all of them are replayed on every run, so a fixed mistake can't come back.`;
     const f = ($('#checkFilter').value || '').toLowerCase();
     const by = new Map();
-    for (const [card, test, ok] of v.results) if (!f || card.toLowerCase().includes(f)) { if (!by.has(card)) by.set(card, []); by.get(card).push([test, ok]); }
-    $('#checkList').innerHTML = [...by.entries()].slice(0, 400).map(([card, tests]) => `<div class="chk-row"><span class="chk-card">${esc(card)}</span><span class="chk-tests">${tests.map(([t, ok]) => `<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${esc(t)}</span>`).join('')}</span></div>`).join('') || '<span class="empty">No matching cards.</span>';
+    for (const [card, test, ok, wrong] of v.results) if (!f || card.toLowerCase().includes(f)) { if (!by.has(card)) by.set(card, []); by.get(card).push([test, ok, wrong]); }
+    $('#checkList').innerHTML = [...by.entries()].slice(0, 400).map(([card, tests]) => `<div class="chk-row"><span class="chk-card">${esc(card)}</span><span class="chk-tests">${tests.map(([t, ok, wrong]) => `<span class="${ok ? 'pass' : 'fail'}${wrong ? ' scen' : ''}">${ok ? '✓' : '✗'} ${esc(t)}${wrong ? `<em>used to: ${esc(wrong)}</em>` : ''}</span>`).join('')}</span></div>`).join('') || '<span class="empty">No matching cards.</span>';
   }
 
   // Graveyard / exile browser; follows the game as it plays

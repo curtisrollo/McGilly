@@ -66,7 +66,7 @@ for (let gi = 0; gi < N; gi++) {
   g.emit = (kind, text, extra = {}) => {
     current.last = text.slice(0, 90);
     if (g.started) {
-      if (kind === 'turn') { checkSBA(g); checkZones(g); landsThisTurn = {}; const ended = current.prevActive; if (ended != null) { const p = g.players[ended]; if (!p.lost && !g.has(p, 'noMaxHand') && p.hand.length > 7) flag('more than seven cards in hand after cleanup', `${p.name} has ${p.hand.length} at the end of their turn`); } current.prevActive = g.active; }
+      if (kind === 'turn') { checkSBA(g); checkZones(g); landsThisTurn = {}; const ended = current.prevActive; if (ended != null) { const p = g.players[ended]; if (!p.lost && !g.has(p, 'noMaxHand') && !(p.emblems || []).includes('tamiyo') && p.hand.length > 7) flag('more than seven cards in hand after cleanup', `${p.name} has ${p.hand.length} at the end of their turn`); } current.prevActive = g.active; }
       if (extra.seat != null && g.players[extra.seat] && g.players[extra.seat].lost && ['cast', 'attack', 'ability', 'land'].includes(kind)) flag('a player who lost keeps acting', `${g.players[extra.seat].name}: ${text.slice(0, 80)}`);
       if (kind === 'cast') {
         const c = g.cards[extra.cards && extra.cards[0]]; const p = g.players[extra.seat];
@@ -74,12 +74,12 @@ for (let gi = 0; gi < N; gi++) {
         if (c && c.info.cost.x && /\(X=0\)/.test(text)) flag('X spell cast for X=0', text);
         if (c && c.info.cost.x && !/X=/.test(text) && !/command zone|graveyard/.test(text)) flag('X spell cast without saying X', text.slice(0, 80));
       }
-      if (kind === 'land') { const s = extra.seat; landsThisTurn[s] = (landsThisTurn[s] || 0) + (/ plays /.test(text) ? 1 : 0); const p = g.players[s]; const allowed = 1 + g.statics(p, 'extraLand').reduce((a, x) => a + x.s.n, 0); if (landsThisTurn[s] > allowed) flag('more land drops than allowed', `${p.name}: ${landsThisTurn[s]} (allowed ${allowed})`); if (s !== g.active && / plays /.test(text)) flag("land played on another player's turn", text); }
+      if (kind === 'land') { const s = extra.seat; landsThisTurn[s] = (landsThisTurn[s] || 0) + (/ plays /.test(text) ? 1 : 0); const p = g.players[s]; const allowed = 1 + g.statics(p, 'extraLand').reduce((a, x) => a + x.s.n, 0) + (p.extraLandsTurn === g.turn ? p.extraLandsGranted || 0 : 0); if (landsThisTurn[s] > allowed) flag('more land drops than allowed', `${p.name}: ${landsThisTurn[s]} (allowed ${allowed})`); if (s !== g.active && / plays /.test(text)) flag("land played on another player's turn", text); }
       if (kind === 'attack' && extra.attackers) for (const a of extra.attackers) { const c = g.cards[a.id]; if (c && c.sick && !g.hasKw(c, 'haste') && !c.info.attack.length && !/onto the battlefield attacking/.test(text)) flag('summoning-sick creature attacks', `${c.info.name}`); if (c && g.hasKw(c, 'defender')) flag('creature with defender attacks', c.info.name); }
     }
     return origEmit(kind, text, extra);
   };
-  try { g.run(); checkZones(g); checkSBA(g); }
+  try { g.run(); checkZones(g); if (!g.over) checkSBA(g); }
   catch (e) { flag('engine crashed', `${e.message} ${String(e.stack).split('\n')[1].trim()}`); }
   // zone integrity during play is checked at the end of each turn too
   if ((gi + 1) % 50 === 0) process.stdout.write(`  ${gi + 1}/${N} games\n`);

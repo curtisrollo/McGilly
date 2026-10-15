@@ -660,4 +660,68 @@ export default [
       return { ok: me.life - l0 >= 6, note: `gained ${me.life - l0}` };
     },
   },
+  {
+    card: 'Carth the Lion', title: 'digs for a planeswalker whenever one of yours is destroyed (not only at 0 loyalty)',
+    wrong: 'it only triggered when loyalty ran out',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Carth the Lion'); const j = put(g, me, 'Jace, the Mind Sculptor');
+      const pw = me.library.find((c) => c.info.isPW); if (pw) { g.removeFrom(me.library, pw); me.library.unshift(pw); }
+      const h0 = me.hand.length; g.destroy(j, 'destroyed', true);
+      return { ok: !pw || me.hand.includes(pw), note: `hand ${h0} -> ${me.hand.length}` };
+    },
+  },
+  {
+    card: 'Vraska the Unseen', title: "-7's Assassins make the player they hit lose the game",
+    wrong: 'they were plain 1/1s',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; const v = put(g, me, 'Vraska the Unseen');
+      g.resolveEffects(me, v.info.loyaltyAbs.find((x) => x.delta <= -7).fx, v, null, true);
+      const a = me.bf.find((c) => c.token && /Assassin/.test(c.info.name)); for (const c of me.bf) if (c.token) c.sick = false;
+      g.hitPlayer(me, opp, a, 1, [], () => {});
+      return { ok: opp.lost, note: opp.lost ? '' : 'still in' };
+    },
+  },
+  {
+    card: 'The Wandering Emperor', title: '-2 exiles only a tapped creature',
+    wrong: 'it exiled any creature',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; const e = put(g, me, 'The Wandering Emperor'); const hoof = put(g, opp, 'Craterhoof Behemoth');
+      g.resolveEffects(me, e.info.loyaltyAbs.find((x) => x.delta === -2).fx, e, null, true);
+      return { ok: hoof.zone === 'bf', note: `untapped Craterhoof: ${hoof.zone}` };
+    },
+  },
+  {
+    card: "Urza's Saga", title: "chapter III can't fetch an X-cost artifact (it would enter with X=0)",
+    wrong: 'Walking Ballista or Astral Cornucopia could be fetched as a dead card',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; me.library = me.library.filter((c) => !(c.info.types.has('Artifact') && c.info.mv <= 1 && !c.info.cost.x));
+      const s0 = me.bf.length; g.resolveEffect(me, { k: 'search', n: 1, what: 'artifact', mvMax: 1, dest: 'bf', noX: true }, null, 0, true);
+      return { ok: !me.bf.slice(s0).some((c) => c.info.cost.x), note: me.bf.slice(s0).map((c) => c.name).join(',') || 'nothing' };
+    },
+  },
+  {
+    card: 'Baxter Building', title: 'its draw needs a creature with toughness 4 or greater',
+    wrong: 'it drew freely',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const b = put(g, me, 'Baxter Building');
+      return { ok: !g.prepareAbility(me, b, b.info.activated[0], true), note: '' };
+    },
+  },
+  {
+    card: 'Takenuma, Abandoned Mire', title: 'channel mills three and returns a creature or planeswalker to hand',
+    wrong: 'it only milled',
+    run({ table, put, card }) {
+      const g = table(); const me = g.players[0]; const t = put(g, me, 'Takenuma, Abandoned Mire'); me.gy = []; card(g, me, 'Craterhoof Behemoth', 'gy');
+      g.resolveEffects(me, t.info.channel.fx, t, null, true);
+      return { ok: me.hand.some((c) => c.name === 'Craterhoof Behemoth'), note: '' };
+    },
+  },
+  {
+    card: "Kaya's Ghostform", title: "isn't cast with nothing worth enchanting",
+    wrong: 'it was cast onto nothing and went straight to the graveyard',
+    run({ table, card }) {
+      const g = table(); const me = g.players[0]; const k = card(g, me, "Kaya's Ghostform", 'hand');
+      return { ok: g.scoreCast(me, k, 'hand') < 0, note: '' };
+    },
+  },
 ];
