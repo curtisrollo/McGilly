@@ -261,4 +261,103 @@ export default [
       return { ok: opp.life === l0 - 5, note: `${l0} -> ${opp.life}` };
     },
   },
+  {
+    card: 'Bloodletter of Aclazotz', title: 'doubles the life lost, not commander damage or lifelink',
+    wrong: 'commander damage and lifelink were counted on the doubled life loss',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; put(g, me, 'Bloodletter of Aclazotz'); const e = put(g, me, 'Edgar Markov'); e.isCommander = true;
+      g.hitPlayer(me, opp, e, 4, [], () => {});
+      return { ok: opp.cmdDmg[e.id] === 4 && opp.life === 32, note: `commander damage ${opp.cmdDmg[e.id]}, life ${opp.life}` };
+    },
+  },
+  {
+    card: 'Phyrexian Tower', title: 'sacrificing a creature adds {B}{B}',
+    wrong: 'it added two colorless mana',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const t = put(g, me, 'Phyrexian Tower'); const b = put(g, me, 'Birds of Paradise');
+      me.floating = {}; g.sacrifice(me, b, t);
+      return { ok: (me.floating.B || 0) === 2, note: JSON.stringify(me.floating) };
+    },
+  },
+  {
+    card: 'Yahenni, Undying Partisan', title: 'sacrifices another creature to survive removal',
+    wrong: 'its sacrifice ability did nothing',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const y = put(g, me, 'Yahenni, Undying Partisan'); put(g, me, 'Birds of Paradise');
+      g.destroy(y);
+      return { ok: y.zone === 'bf' && !me.bf.some((c) => c.name === 'Birds of Paradise'), note: `Yahenni ${y.zone}` };
+    },
+  },
+  {
+    card: 'Yawgmoth, Thran Physician', title: 'puts a -1/-1 counter on a creature as well as drawing',
+    wrong: 'it only drew',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; const y = put(g, me, 'Yawgmoth, Thran Physician'); const bird = put(g, opp, 'Birds of Paradise');
+      g.resolveEffects(me, y.info.activated[0].fx, y, null, true);
+      return { ok: bird.zone !== 'bf', note: bird.zone };
+    },
+  },
+  {
+    card: "Serra's Sanctum", title: 'taps for {W} for each enchantment you control',
+    wrong: 'it tapped for one mana',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; me.bf = []; const s = put(g, me, "Serra's Sanctum"); put(g, me, 'Exploration'); put(g, me, 'Doubling Season'); put(g, me, 'Smothering Tithe');
+      return { ok: g.availableMana(me) === 3, note: `${g.availableMana(me)} mana` };
+    },
+  },
+  {
+    card: 'Myrkul, Lord of Bones', title: 'with Doubling Season, a dying creature comes back as two enchantment copies (summoning sick)',
+    wrong: 'only one copy was made, and copies could tap or attack right away',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Myrkul, Lord of Bones'); put(g, me, 'Doubling Season'); const w = put(g, me, 'Eternal Witness');
+      g.destroy(w, 'destroyed', true);
+      const copies = me.bf.filter((c) => c.ench && c.name === 'Eternal Witness');
+      return { ok: copies.length === 2 && copies.every((c) => c.sick), note: `${copies.length} copies` };
+    },
+  },
+  {
+    card: 'Academy Rector', title: 'it has to exile itself to search; a token copy can\'t',
+    wrong: 'the search happened even when the Rector could not be exiled (Myrkul copy, already exiled)',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Myrkul, Lord of Bones'); const r = put(g, me, 'Academy Rector');
+      const ench0 = me.bf.filter((c) => c.info.types.has('Enchantment') && !c.ench).length;
+      g.destroy(r, 'destroyed', true); // Myrkul exiles it first: the Rector's own search fails
+      const ench1 = me.bf.filter((c) => c.info.types.has('Enchantment') && !c.ench).length;
+      return { ok: ench1 === ench0, note: `fetched ${ench1 - ench0} enchantments` };
+    },
+  },
+  {
+    card: 'Patron of the Vein', title: "an opponent's creature that dies is exiled",
+    wrong: 'it stayed in the graveyard',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; put(g, me, 'Patron of the Vein'); const b = put(g, opp, 'Birds of Paradise');
+      g.destroy(b);
+      return { ok: b.zone === 'exile', note: b.zone };
+    },
+  },
+  {
+    card: 'Opalescence', title: 'Starfield of Nyx is animated by Opalescence (they animate each other)',
+    wrong: 'each excluded the other',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Opalescence'); const st = put(g, me, 'Starfield of Nyx'); g.refreshAnimations();
+      return { ok: st.info.isCreature, note: `Starfield creature: ${st.info.isCreature}` };
+    },
+  },
+  {
+    card: 'Heliod, Sun-Crowned', title: 'becomes a creature with devotion to white of five or more',
+    wrong: 'it was never a creature',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const h = put(g, me, 'Heliod, Sun-Crowned'); put(g, me, 'Archon of Sun\'s Grace'); put(g, me, 'Elesh Norn, Grand Cenobite'); g.refreshAnimations();
+      return { ok: h.info.isCreature, note: `creature: ${h.info.isCreature}` };
+    },
+  },
+  {
+    card: 'Chrome Mox', title: 'taps only for the colours of the card it imprinted',
+    wrong: "it tapped for any of the deck's colours, even with nothing imprinted",
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const m = put(g, me, 'Chrome Mox');
+      const src = g.sources(me).find((x) => x.c === m);
+      return { ok: !src, note: src ? 'made mana with nothing imprinted' : '' };
+    },
+  },
 ];

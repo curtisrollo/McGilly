@@ -16,7 +16,7 @@
   // Known multi-card combos that appear in the decklists. Each entry lists the pieces;
   // the AI hunts for the missing piece with tutors and casts pieces eagerly once the rest are in place.
   const COMBOS = [
-    { name: 'Sanguine Bond loop', pieces: [['Sanguine Bond', 'Vito, Thorn of the Dusk Rose', 'Dina, Soul Steeper'], ['Exquisite Blood', 'Bloodthirsty Conqueror']] },
+    { name: 'Sanguine Bond loop', pieces: [['Sanguine Bond', 'Vito, Thorn of the Dusk Rose', 'Dina, Soul Steeper', 'Enduring Tenacity', 'Marauding Blight-Priest'], ['Exquisite Blood', 'Bloodthirsty Conqueror']] },
     { name: 'Karn lock', pieces: [['Karn, the Great Creator'], ['Mycosynth Lattice']] },
     { name: 'Infinite mana', pieces: [['Basalt Monolith'], ['Rings of Brighthearth']] },
     { name: 'Myrkul + Devoted Druid', pieces: [['Myrkul, Lord of Bones'], ['Devoted Druid']] },
@@ -588,7 +588,9 @@
   // and `cover` marks which rules-text lines it accounts for (the audit uses this).
   const ALL = /./;
   const SCRIPTS = {
-    'Academy Rector': (a, cover) => { a.dies = []; a.dies.push({ k: 'search', n: 1, what: 'enchantment', dest: 'bf' }); cover(/dies/); },
+    'Academy Rector': (a, cover) => { a.dies = [{ k: 'rectorExile' }, { k: 'search', n: 1, what: 'enchantment', dest: 'bf', needsRector: true }]; cover(/dies/); },
+    'Sun Titan': (a, cover) => { a.etb = [{ k: 'reanimate', any: false, mvMax: 3, perm: true, lands: true }]; a.attack = [{ k: 'reanimate', any: false, mvMax: 3, perm: true, lands: true }]; cover(ALL); },
+    'Patron of the Vein': (a, cover) => { a.deathWatch = a.deathWatch.map((w) => ({ ...w, fx: [{ k: 'exileDead' }, ...w.fx] })); cover(ALL); },
     'Arena Rector': (a, cover) => { a.dies = []; a.dies.push({ k: 'search', n: 1, what: 'planeswalker', dest: 'bf' }); cover(/dies/); },
     'Ajani Steadfast': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'pump', p: 1, t: 1, kw: ['first strike', 'vigilance', 'lifelink'] }]; a.loyaltyAbs[1].fx = [{ k: 'counters', n: 1, on: 'each' }, { k: 'loyaltyEach', other: true }]; a.loyaltyAbs[2].fx = [{ k: 'emblem', e: 'damageCap1' }]; cover(ALL); },
     'Brokers Ascendancy': (a, cover) => { a.endstep = [{ each: false, fx: [{ k: 'counters', n: 1, on: 'each' }, { k: 'loyaltyEach' }] }]; cover(ALL); },
@@ -800,7 +802,8 @@
     'Vorinclex, Monstrous Raider': (a, cover) => { a.statics.push({ k: 'vorinclexHalf' }); cover(ALL); },
     'Vraska the Unseen': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'vraskaShield' }]; cover(ALL); },
     'Walking Ballista': (a, cover) => { a.activated = a.activated.filter((x) => !x.fx.some((f) => f.k === 'damage')); cover(ALL); }, // pinging (remove a counter) is handled by pingers()
-    'Yawgmoth, Thran Physician': (a, cover) => { a.protectionFrom = 'Human'; cover(ALL); },
+    'Yawgmoth, Thran Physician': (a, cover) => { a.protectionFrom = 'Human'; if (a.activated[0]) a.activated[0].fx = [{ k: 'minusCounter' }, { k: 'draw', n: 1 }]; cover(ALL); },
+    'Yahenni, Undying Partisan': (a, cover) => { if (a.sacOutlet) a.sacOutlet.fx = [{ k: 'selfIndestructible' }]; a.yahenni = true; cover(ALL); },
     'Zur the Enchanter': (a, cover) => { a.attack = [{ k: 'search', n: 1, what: 'enchantment', mvMax: 3, dest: 'bf' }]; cover(ALL); },
     'Glen Elendra Archmage': (a, cover) => { cover(ALL); },
     'Ledger Shredder ': null,
@@ -1270,6 +1273,8 @@
       const wasCreature = c.info.isCreature;
       const undying = this.hasKw(c, 'undying') && c.p1 === 0 && !c.token;
       const persist = this.hasKw(c, 'persist') && c.p1 >= 0 && !c.token && !undying;
+      // Yahenni: sacrifice another creature to make it indestructible in response
+      if (!force && c.info.yahenni) { const f = ctrl.bf.filter((x) => x !== c && x.info.isCreature && !x.isCommander).sort((a, b) => this.creatureValue(a) - this.creatureValue(b))[0]; if (f && this.creatureValue(f) < this.creatureValue(c) + 4) { this.emit('response', `${ctrl.name} sacrifices ${this.cname(f)}: Yahenni gains indestructible.`, { seat: ctrl.seat, cards: [c.id, f.id] }); this.destroy(f, 'sacrificed', true); c.indestructibleEOT = true; return false; } }
       if (!force && c.info.koma) { const coil = ctrl.bf.find((x) => x !== c && x.info.isCreature && this.isType(x, 'Serpent')); if (coil) { this.destroy(coil, 'sacrificed', true); c.indestructibleEOT = true; this.emit('response', `${ctrl.name} sacrifices a Serpent: Koma gains indestructible.`, { seat: ctrl.seat, cards: [c.id] }); return false; } }
       // Kalitas: an opponent's nontoken creature is exiled instead and Kalitas's controller makes a Zombie
       const kal = wasCreature && !c.token && this.alive().find((q) => q.seat !== c.ctrl && this.has(q, 'kalitas'));
@@ -1356,8 +1361,9 @@
       if (!c.token && !c.isCommander && c.zone === 'gy' && this.watchers(ctrl, c).some((m) => m.info.triggers.some((t) => t.k === 'myrkul'))) {
         this.removeFrom(this.P(c.owner).gy, c); c.zone = 'exile'; this.P(c.owner).exile.push(c);
         const info = Object.assign(Object.create(Object.getPrototypeOf(c.info)), c.info, { isCreature: false, types: new Set(['Enchantment']), name: c.info.name, power: undefined, toughness: undefined });
-        const t = { id: this.nextId++, name: c.info.name, info, owner: ctrl.seat, ctrl: ctrl.seat, isCommander: false, token: true, tapped: false, sick: false, p1: 0, loyalty: 0, dmg: 0, dt: false, attached: null, eot: { p: 0, t: 0, kw: [] }, zone: 'bf', ench: true };
-        this.cards[t.id] = t; ctrl.bf.push(t);
+        const copies = this.tokenMult(ctrl);
+        let t;
+        for (let k = 0; k < copies; k++) { t = { id: this.nextId++, name: c.info.name, info, owner: ctrl.seat, ctrl: ctrl.seat, isCommander: false, token: true, tapped: false, sick: true, p1: 0, loyalty: 0, dmg: 0, dt: false, attached: null, eot: { p: 0, t: 0, kw: [] }, zone: 'bf', ench: true }; this.cards[t.id] = t; ctrl.bf.push(t); }
         this.emit('trigger', `Myrkul exiles ${c.info.name} and makes an enchantment token copy of it.`, { seat: ctrl.seat, cards: [t.id] });
         // the copy "enters the battlefield", so its own enters abilities trigger again
         if (info.etb && info.etb.length) this.resolveEffects(ctrl, info.etb, t, `${info.name} (enchantment copy) enters`, false);
@@ -1365,6 +1371,7 @@
       }
       // own dies triggers
       if (c.info.dies.length) this.resolveEffects(ctrl, c.info.dies, c, `${c.info.name} dies`);
+      this._dyingCard = c;
       for (const pl of this.alive()) for (const src of this.watchers(pl, c).concat(pl === ctrl && c.info.deathWatch.some((w) => w.orSelf) ? [c] : [])) {
         for (const w of src.info.deathWatch) {
           if (src === c && !w.orSelf) continue; // "Blood Artist or another creature": it sees its own death
@@ -1599,8 +1606,8 @@
       if (so.tap) outlet.tapped = true;
       this._sacPower = this.power(c);
       this.destroy(c, 'sacrificed', true);
-      for (const f of so.fx || []) if (['draw', 'tutor', 'counters', 'millPower'].includes(f.k)) this.resolveEffect(p, f, outlet, 0, true);
-      if (so.addsMana) this.addFloating(p, 'C', 2);
+      for (const f of so.fx || []) if (f.k !== 'ritual') this.resolveEffect(p, f, outlet, 0, true);
+      if (so.addsMana) { const fm = outlet.info.fodderMana; const r = (so.fx || []).find((f) => f.k === 'ritual'); this.addFloating(p, (r && r.color) || (fm && fm.colors && fm.colors[0]) || 'C', (r && r.n) || (fm && fm.amount) || 2); }
       return true;
     }
     fodder(p, outlet) {
@@ -1686,7 +1693,7 @@
       else { this.resolveEffects(p, c.info.spell, c, null, false); if (c.zone !== 'bf') { c.zone = 'exile'; this.P(c.owner).exile.push(c); } }
       this.checkState();
     }
-    weakestOpp(p) { const o = this.opps(p); return o.sort((a, b) => a.life - b.life)[0]; }
+    weakestOpp(p) { const o = this.opps(p); const open = o.filter((q) => !(q.protectedUntil >= this.turn)); return (open.length ? open : o).sort((a, b) => a.life - b.life)[0]; }
 
     // ----- mana -----
     sources(p) {
@@ -1704,6 +1711,9 @@
           if (p.bf.some((x) => x.info.allBasicTypes || x.info.lantern)) extra.push(...COLORS);
           if (extra.length) opts = opts.map((o) => ({ ...o, colors: [...new Set(o.colors.filter((x) => x !== 'C' || o.colors.length === 1).concat(extra))] }));
         }
+        if (c.info.name === "Serra's Sanctum") opts = [{ colors: ['W'], amount: Math.max(1, p.bf.filter((x) => x.info.types.has('Enchantment')).length), dmg: 0 }];
+        if (c.info.name === 'Sanctum Weaver') { const n = p.bf.filter((x) => x.info.types.has('Enchantment')).length; if (!n) continue; opts = [{ colors: COLORS.slice(), amount: n, dmg: 0 }]; }
+        if (c.info.name === 'Chrome Mox') { const cols = c.imprinted ? [...c.imprinted.info.colors] : []; if (!cols.length) continue; opts = [{ colors: cols, amount: 1, dmg: 0 }]; }
         if (c.info.coffers) { const n = p.bf.filter((x) => x.info.isLand && this.landTypes(p, x).includes('Swamp')).length; opts = [{ colors: ['B'], amount: Math.max(1, n - 2), dmg: 0 }]; }
         if (m.charge) { if (!c.charge) continue; opts = opts.map((o) => ({ ...o, amount: c.charge })); }
         if (m.bloom) { const cols = new Set(p.bf.flatMap((x) => [...(x.info.colors || [])])); if (!cols.size) continue; opts = [{ colors: [...cols], amount: cols.size, dmg: 0 }]; }
@@ -1847,6 +1857,7 @@
       if (c.info.sower) c.sowerPair = this.opps(p).sort((a, b) => b.life - a.life).slice(0, 2).map((q) => q.seat);
       if (c.info.isCreature && this.opps(p).some((q) => this.has(q, 'oppEnterTapped'))) c.tapped = true;
       p.bf.push(c);
+      this.refreshAnimations(); // Opalescence makes an enchantment a creature as it enters; devotion may wake a god
       if (o.announce) o.announce(c); // logged once it is on the battlefield, before its own enters triggers
       if (c.info.isLand) {
         if (c.info.etbTapped) c.tapped = true;
@@ -1899,8 +1910,8 @@
       if (c.info.types.has('Enchantment')) for (const src of [...p.bf]) for (const fx of (src.info.constellation || [])) this.resolveEffects(p, fx, src, `${src.info.name} (constellation)`, true);
       if (!o.noEtb && c.info.etb.length) this.resolveEffects(p, c.info.etb, c, o.quiet ? null : `${c.info.name} enters`, false, o.xVal || 0);
       if (c.info.imprint) {
-        const exiled = p.hand.find((x) => !x.info.isLand && !x.info.types.has('Artifact'));
-        if (exiled) { this.removeFrom(p.hand, exiled); exiled.zone = 'exile'; p.exile.push(exiled); }
+        const exiled = p.hand.filter((x) => !x.info.isLand && !x.info.types.has('Artifact') && x.info.colors.size).sort((a, b) => this.cardValue(p, a) - this.cardValue(p, b))[0];
+        if (exiled) { this.removeFrom(p.hand, exiled); exiled.zone = 'exile'; p.exile.push(exiled); c.imprinted = exiled; this.emit('effect', `${c.info.name} imprints ${exiled.info.name}.`, { seat: p.seat, cards: [c.id] }); }
       }
     }
 
@@ -2222,7 +2233,7 @@
         }
         case 'reanimate': {
           const pools = fx.any ? this.alive().flatMap((q) => q.gy) : p.gy;
-          const c = pools.filter((x) => (fx.perm ? x.info.isPermanent && !x.info.isLand && x.info.mv <= fx.mvMax : x.info.isCreature) && !x.isCommander && (!fx.loseMv || this.canPayLife(p, x.info.mv))).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0];
+          const c = pools.filter((x) => (fx.perm ? x.info.isPermanent && x.info.mv <= fx.mvMax && (!x.info.isLand || fx.lands) : x.info.isCreature) && !x.isCommander && (!fx.loseMv || this.canPayLife(p, x.info.mv))).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0];
           if (c) {
             this.removeFrom(this.P(c.owner).gy, c);
             if (src && src.info.reanimAura && src.zone === 'bf') src.attached = c.id;
@@ -2304,6 +2315,7 @@
           break;
         }
         case 'search': {
+          if (fx.needsRector && this._rectorFailed) break; // Academy Rector: "if you do" (it had to be exiled)
           this.searched(p);
           const n = X(fx.n) || 1;
           const w = fx.what;
@@ -2401,6 +2413,15 @@
           break;
         }
         case 'loseSelf': this.loseLife(p, X(fx.n)); break;
+        case 'selfIndestructible': if (src && src.zone === 'bf') src.indestructibleEOT = true; break;
+        case 'minusCounter': {
+          // Yawgmoth: a -1/-1 counter on up to one target creature: an opponent's creature it kills, the best one
+          const t = this.bestOppTarget(p, (x) => x.info.isCreature && this.targetable(x, p) && this.toughness(x) - x.dmg <= 1);
+          if (t) { t.p1 -= 1; this.emit('removal', `${name}: a -1/-1 counter on ${this.P(t.ctrl).name}'s ${this.cname(t)}.`, { seat: p.seat, cards: [t.id], target: t.ctrl }); this.checkState(); }
+          break;
+        }
+        case 'exileDead': { const d = this._dyingCard; if (d && d.zone === 'gy' && !d.token) { this.removeFrom(this.P(d.owner).gy, d); d.zone = 'exile'; this.P(d.owner).exile.push(d); } break; }
+        case 'rectorExile': { if (!src || src.token || src.zone !== 'gy') { this._rectorFailed = true; break; } this.removeFrom(this.P(src.owner).gy, src); src.zone = 'exile'; this.P(src.owner).exile.push(src); this._rectorFailed = false; break; }
         case 'loyaltyEach': {
           const ws = p.bf.filter((c) => c.info.isPW && (!fx.other || c !== src));
           for (const c of ws) c.loyalty += this.counterAmount(p, 1, 'loyalty');
@@ -2818,7 +2839,8 @@
       if (!card) return false;
       if (card.info.kickerProtectAll && wipe) this.pay(q, { ...card.info.cost, generic: card.info.cost.generic + card.info.kickerProtectAll.generic, pips: card.info.cost.pips.concat(card.info.kickerProtectAll.pips) }, 0, true);
       else this.pay(q, card.info.cost, 0, true);
-      this.removeFrom(q.hand, card); this.toGraveyard(card);
+      this.removeFrom(q.hand, card);
+      if (/exile teferi's protection|exile cardname/i.test(card.info.text || '')) { card.zone = 'exile'; q.exile.push(card); } else this.toGraveyard(card, q.seat);
       if (card.info.spell.some((f) => f.single) && !wipe) { const t = threatened[0]; if (t) this.phaseOut(t, null); this.emit('response', `${q.name} phases out ${t ? t.info.name : 'a creature'} with ${card.info.name}!`, { seat: q.seat, cards: [card.id] }); return true; }
       if (card.info.spell.some((f) => f.single) && wipe) { for (const c of q.bf.filter((x) => x.info.isCreature)) this.phaseOut(c, null); this.emit('response', `${q.name} kicks ${card.info.name} and phases out their creatures!`, { seat: q.seat, cards: [card.id] }); return true; }
       if (/phase out|protection from everything/i.test(card.info.text)) q.protectedUntil = this.turn + this.alive().length - 1;
@@ -2953,14 +2975,24 @@
     // ----- state-based actions -----
     // Opalescence / Starfield of Nyx turn enchantments into creatures
     refreshAnimations() {
+      // Opalescence: each OTHER non-Aura enchantment; Starfield of Nyx (5+ enchantments): each other non-Aura
+      // enchantment you control. They animate each other. Base power/toughness = mana value (enchantment creatures too).
+      const opals = this.alive().flatMap((x) => x.bf.filter((c) => (c.baseInfo || c.info).statics.some((st) => st.k === 'opalescence')));
       for (const q of this.alive()) {
-        const opal = this.alive().some((x) => this.has(x, 'opalescence'));
-        const star = this.has(q, 'starfield') && q.bf.filter((c) => c.info.types.has('Enchantment')).length >= 5;
+        const stars = q.bf.filter((c) => (c.baseInfo || c.info).statics.some((st) => st.k === 'starfield'));
+        const starOn = stars.length && q.bf.filter((c) => c.info.types.has('Enchantment')).length >= 5;
         for (const c of q.bf) {
           const base = c.baseInfo || c.info;
-          const should = base.types.has('Enchantment') && !base.isAura && !base.isCreature && !base.statics.some((x) => x.k === 'opalescence' || x.k === 'starfield') && (opal || star);
+          const should = base.types.has('Enchantment') && !base.isAura && (opals.some((o) => o !== c) || (starOn && stars.some((o) => o !== c)));
           if (should && c.animatedBy !== 'ench') { this.setInfo(c, { isCreature: true, power: base.mv, toughness: base.mv, types: new Set([...base.types, 'Creature']) }); c.animatedBy = 'ench'; }
           else if (!should && c.animatedBy === 'ench') { this.restoreInfo(c); c.animatedBy = null; }
+          // Theros gods (Heliod): a creature only with devotion 5+ to its colour
+          if (base.godDevotion) {
+            const col = [...(base.colors || [])][0] || 'W';
+            const dev = q.bf.reduce((a, x) => a + ((x.info.cost && x.info.cost.pips) || []).filter((pp) => pp.opts.includes(col)).length, 0);
+            if (dev >= 5 && c.animatedBy !== 'god') { const pt = ((base.face && base.face.pt) || '5/5').split('/').map(Number); this.setInfo(c, { isCreature: true, power: pt[0], toughness: pt[1], types: new Set([...base.types, 'Creature']) }); c.animatedBy = 'god'; }
+            else if (dev < 5 && c.animatedBy === 'god') { this.restoreInfo(c); c.animatedBy = null; }
+          }
         }
       }
     }
@@ -3600,7 +3632,7 @@
         const lands = p.hand.filter((c) => c.info.isLand);
         const mdfc = p.hand.filter((c) => c.info.mdfcLand);
         let pick = null, face = null;
-        if (this.has(p, 'landsFromTop') && p.library[0] && p.library[0].info.isLand) { pick = p.library.shift(); p.hand.push(pick); }
+        if ((this.has(p, 'landsFromTop') || p.bf.some((x) => x.info.citadel)) && p.library[0] && p.library[0].info.isLand) { pick = p.library.shift(); p.hand.push(pick); }
         else if (lands.length) pick = this.chooseLandDrop(p, lands);
         else if (mdfc.length && p.bf.filter((c) => c.info.isLand).length < 6) { pick = mdfc[0]; face = pick.info.mdfcLand; }
         else if (this.has(p, 'landsFromTop') && p.library[0] && p.library[0].info.isLand) { pick = p.library.shift(); p.hand.push(pick); }
@@ -3759,7 +3791,7 @@
       if (ab.life && (p.life - ab.life < 10 || !this.canPayLife(p, ab.life))) return null;
       if (ab.sacOther && !ab.sacArtifact && !ab.sacCreature && !ab.sacArtifactN) return null;
       if (ab.discard && p.hand.length < ab.discard + 1) return null;
-      if ((ab.sacCreature || ab.discard) && !ab.fx.some((f) => ['draw', 'tutor', 'damage', 'removal', 'search', 'drain', 'tokens'].includes(f.k))) return null;
+      if ((ab.sacCreature || ab.discard) && !ab.fx.some((f) => ['draw', 'tutor', 'damage', 'removal', 'search', 'drain', 'tokens', 'proliferate'].includes(f.k))) return null;
       if (!this.abilityUseful(p, ab, c, postCombat)) return null;
       let fodder = [];
       if (ab.sacArtifact) {
@@ -3860,7 +3892,8 @@
               const copy = p.bf.find((x) => x.ench && x.info.name === c.info.name && !x.tapped);
               if (!copy) break;
               this.emit('combo', `${copy.info.name} is an enchantment now: it untaps for free, so it can make players discard their whole hand.`, { seat: p.seat, cards: [copy.id] });
-              for (let k = 0; k < 40 && this.opps(p).some((q) => q.hand.length); k++) this.resolveEffects(p, ab.fx, copy, null, false);
+              // (if Opalescence makes the copy a creature again, each untap's -1/-1 counter counts and it dies)
+              for (let k = 0; k < 40 && copy.zone === 'bf' && this.opps(p).some((q) => q.hand.length); k++) { this.resolveEffects(p, ab.fx, copy, null, false); if (copy.info.isCreature) { copy.p1 -= 1; this.checkState(); } }
               copy.tapped = true;
               break;
             }
@@ -4340,8 +4373,9 @@
       let n;
       if (this.hasKw(a, 'infect')) { q.poison += dmg; n = dmg; } else n = this.loseLife(q, dmg, a);
       tally(n);
-      if (a.isCommander && n) q.cmdDmg[a.id] = (q.cmdDmg[a.id] || 0) + n;
-      if (this.hasKw(a, 'lifelink')) ll.push(n);
+      const dealt = this.hasKw(a, 'infect') ? dmg : (n ? dmg : 0); // damage dealt; Bloodletter only doubles the life lost
+      if (a.isCommander && dealt) q.cmdDmg[a.id] = (q.cmdDmg[a.id] || 0) + dealt;
+      if (this.hasKw(a, 'lifelink')) ll.push(dealt);
       this._combatDefender = q;
       for (const g of p.bf) if (g.info.triggers.some((t) => t.k === 'gnawbone')) this.addToken(p, { treasure: true }, n, false);
       if (a.info.combatDmg.length) this.resolveEffects(p, a.info.combatDmg, a, null, true);
