@@ -519,4 +519,79 @@ export default [
       return { ok: !g.hasKw(a, 'haste') && g.hasKw(w, 'haste'), note: `Alibou ${g.hasKw(a, 'haste')}, Wurmcoil ${g.hasKw(w, 'haste')}` };
     },
   },
+  {
+    card: 'Whip of Erebos', title: 'the returned creature has haste and is exiled at the end step (exiled if it would leave)',
+    wrong: 'the creature stayed forever and later died to the graveyard',
+    run({ table, put, card }) {
+      const g = table(); const me = g.players[0]; const w = put(g, me, 'Whip of Erebos'); me.gy = []; const c = card(g, me, 'Craterhoof Behemoth', 'gy');
+      g.resolveEffects(me, w.info.activated[0].fx, w, null, true); const haste = g.hasKw(c, 'haste');
+      g.destroy(c, 'destroyed', true);
+      return { ok: haste && c.zone === 'exile', note: `haste ${haste}, then ${c.zone}` };
+    },
+  },
+  {
+    card: "Agadeem's Awakening // Agadeem, the Undercrypt", title: 'returns creatures with different mana values, each X or less',
+    wrong: 'it returned one creature of any mana value',
+    run({ table, card }) {
+      const g = table(); const me = g.players[0]; me.gy = []; for (const n of ['Birds of Paradise', 'Eternal Witness', 'Craterhoof Behemoth']) card(g, me, n, 'gy');
+      g.resolveEffect(me, { k: 'agadeem' }, null, 3, true);
+      const back = me.bf.filter((c) => ['Birds of Paradise', 'Eternal Witness', 'Craterhoof Behemoth'].includes(c.name)).map((c) => c.name);
+      return { ok: back.length === 2 && !back.includes('Craterhoof Behemoth'), note: back.join(', ') };
+    },
+  },
+  {
+    card: 'Toski, Bearer of Secrets', title: 'draws when any creature you control deals combat damage to a player',
+    wrong: 'only Toski itself drew',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; put(g, me, 'Toski, Bearer of Secrets'); const c = put(g, me, 'Craterhoof Behemoth'); const h0 = me.hand.length;
+      g.hitPlayer(me, opp, c, 5, [], () => {});
+      return { ok: me.hand.length === h0 + 1, note: `drew ${me.hand.length - h0}` };
+    },
+  },
+  {
+    card: 'Ayara, First of Locthwain', title: 'her draw ability sacrifices only a black creature',
+    wrong: 'any creature could be sacrificed',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const a = put(g, me, 'Ayara, First of Locthwain'); put(g, me, 'Birds of Paradise');
+      const prep = g.prepareAbility(me, a, a.info.activated[0], true);
+      return { ok: !prep || prep.fodder.every((x) => x.info.colors.has('B')), note: prep ? prep.fodder.map((x) => x.name).join(',') : 'not activated (no black fodder)' };
+    },
+  },
+  {
+    card: "Green Sun's Zenith", title: 'finds a green creature with mana value X or less and shuffles itself back',
+    wrong: 'X=0 still found a 3-drop, any colour, and it went to the graveyard',
+    run({ table, card }) {
+      const g = table(); const me = g.players[0]; const gz = card(g, me, "Green Sun's Zenith", 'hand'); const lib0 = me.library.length;
+      g.resolveEffect(me, { k: 'tutorBF' }, gz, 0, true);
+      const got = me.bf.filter((c) => c.info.isCreature && !c.token && c.info.mv > 0);
+      g.toGraveyard(gz);
+      return { ok: got.length === 0 && gz.zone === 'library', note: `${got.map((c) => c.name).join(',') || 'nothing'} fetched; GSZ in ${gz.zone}` };
+    },
+  },
+  {
+    card: 'Temple of the False God', title: 'taps for mana only with five or more lands',
+    wrong: 'it always tapped for {C}{C}',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; me.bf = []; const t = put(g, me, 'Temple of the False God');
+      return { ok: !g.sources(me).some((x) => x.c === t), note: '' };
+    },
+  },
+  {
+    card: 'Return of the Wildspeaker', title: '+3/+3 goes to non-Human creatures only',
+    wrong: 'Humans got it too',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const h = put(g, me, 'Hermit Druid'); const e = put(g, me, 'Craterhoof Behemoth'); const p0 = g.power(h), e0 = g.power(e);
+      g.resolveEffect(me, { k: 'overrun', p: 3, t: 3, kw: [], notSub: 'Human' }, null, 0, true);
+      return { ok: g.power(h) === p0 && g.power(e) === e0 + 3, note: `Human +${g.power(h) - p0}, non-Human +${g.power(e) - e0}` };
+    },
+  },
+  {
+    card: 'Grim Backwoods', title: 'as a sacrifice outlet it costs {2}{B}{G}, not three generic',
+    wrong: 'the cost was read as a count of symbols',
+    run({ table, put }) {
+      const g = table(); const gb = put(g, g.players[0], 'Grim Backwoods');
+      const c = gb.info.sacOutlet && gb.info.sacOutlet.cost;
+      return { ok: !!c && c.mv === 4 && c.pips.length === 2, note: JSON.stringify(c) };
+    },
+  },
 ];

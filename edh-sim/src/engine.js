@@ -481,7 +481,7 @@
         if (fx.length) {
           const mana = costText.match(/\{(\d+|[WUBRGCX])\}/g) || [];
           const cost = parseCost(mana.map((x) => x.slice(1, -1)).join(' ').replace(/\bX\b/g, ''));
-          if (/Sacrifice (a|another) creature/i.test(costText)) a.sacOutlet = { tap: /\{T\}/.test(costText), life: +(costText.match(/Pay (\d+) life/) || [])[1] || 0, mana: (costText.match(/\{(\d+|[WUBRGC])\}/g) || []).filter((x) => x !== '{T}').length, fx: fx };
+          if (/Sacrifice (a|another) creature/i.test(costText)) a.sacOutlet = { tap: /\{T\}/.test(costText), life: +(costText.match(/Pay (\d+) life/) || [])[1] || 0, mana: cost.mv, cost, fx: fx };
           const sacN = (re) => { const mm = costText.match(re); return mm ? num(mm[1]) : 0; };
           a.activated.push({ sacCreature: sacN(/Sacrifice (a|an|another|two|three) (?:[a-z]+ )?creatures?/i), sacArtifactN: sacN(/Sacrifice (an|a|two|three) artifacts?/i), discard: sacN(/Discard (a|two) cards?/i), tap: /\{T\}/.test(costText), sac: /Sacrifice CARDNAME/i.test(costText), sacOther: /Sacrifice (a|an|another) /i.test(costText) && !/CARDNAME/.test(costText), cost, fx, life: +(costText.match(/Pay (\d+) life/) || [])[1] || 0, text: m[2], sorcery: /activate only as a sorcery/i.test(line) });
         }
@@ -777,7 +777,11 @@
     'Staff of Domination': (a, cover) => { a.activated = a.activated.filter((x) => x.fx.some((f) => f.k === 'draw' || f.k === 'gain')); a.activated.push({ tap: true, cost: parseCost('4'), fx: [{ k: 'tapBlocker' }], text: 'Tap target creature.', preCombat: true }); cover(ALL); },
     'Strip Mine': (a, cover) => { a.activated = [{ tap: true, sac: true, cost: parseCost(''), fx: [{ k: 'landDestroy' }], text: 'Destroy target land.' }]; cover(ALL); },
     'Supreme Verdict': (a, cover) => { a.uncounterable = true; cover(ALL); },
-    'Toski, Bearer of Secrets': (a, cover) => { a.uncounterable = true; a.mustAttack = true; cover(ALL); },
+    'Toski, Bearer of Secrets': (a, cover) => { a.uncounterable = true; a.mustAttack = true; a.combatDmg = []; a.toski = true; cover(ALL); },
+    "Green Sun's Zenith": (a, cover) => { a.shuffleBack = true; cover(ALL); },
+    'Whip of Erebos': (a, cover) => { if (a.activated[0]) { a.activated[0].fx = [{ k: 'reanimate', any: false, whip: true }]; a.activated[0].sorcery = true; } cover(ALL); },
+    "Agadeem's Awakening // Agadeem, the Undercrypt": (a, cover) => { a.spell = [{ k: 'agadeem' }]; cover(ALL); },
+    "Assassin's Trophy": (a, cover) => { a.spell = [{ k: 'removal', what: 'nonland', comp: 'land', destroyComp: true }]; cover(ALL); },
     'Sword of Feast and Famine': (a, cover) => { a.statics = a.statics.filter((x) => x.k !== 'equipBuff'); a.statics.push({ k: 'equipBuff', p: 2, t: 2, kw: ['protection'], protect: ['B', 'G'] }); a.combatDmg = [{ k: 'discard', n: 1 }, { k: 'untapLands' }]; a.equipCombat = true; cover(ALL); },
     'Sylvan Library': (a, cover) => { cover(ALL); },
     'Tamiyo, Field Researcher': (a, cover) => { const t7 = a.loyaltyAbs.find((x) => x.delta === -7); if (t7) t7.fx = [{ k: 'draw', n: 3 }, { k: 'emblem', e: 'freeSpells' }]; a.loyaltyAbs[0].fx = [{ k: 'noop' }]; const m2 = a.loyaltyAbs.find((x) => x.delta === -2); if (m2) m2.fx = [{ k: 'freeze', n: 2 }]; cover(ALL); },
@@ -815,7 +819,7 @@
   delete SCRIPTS['Ledger Shredder '];
   Object.assign(SCRIPTS, {
     'Alibou, Ancient Witness': (a, cover) => { a.statics = [{ k: 'artifactHaste' }]; a.triggers.push({ k: 'alibou' }); cover(ALL); },
-    'Ayara, First of Locthwain': (a, cover) => { a.etb = [{ k: 'drain', n: 1, gain: true }]; a.myCreatureEtb = [[{ k: 'drain', n: 1, gain: true, ifColor: 'B' }]]; cover(ALL); },
+    'Ayara, First of Locthwain': (a, cover) => { if (a.activated[0]) a.activated[0].sacColor = 'B'; a.etb = [{ k: 'drain', n: 1, gain: true }]; a.myCreatureEtb = [[{ k: 'drain', n: 1, gain: true, ifColor: 'B' }]]; cover(ALL); },
     'Losheel, Clockwork Scholar': (a, cover) => { a.statics = [{ k: 'losheel' }]; a.losheelDraw = true; cover(ALL); },
     'The Great Henge': (a, cover) => { a.henge = true; a.mana = { opts: [{ colors: ['G'], amount: 2, dmg: 0, gain: 2 }], oneShot: false }; a.myCreatureEtb = [[{ k: 'counters', n: 1, on: 'entering', nontoken: true }, { k: 'draw', n: 1, nontoken: true }]]; cover(ALL); },
     'Finale of Devastation': (a, cover) => { a.spell = [{ k: 'finale' }]; cover(ALL); },
@@ -1235,6 +1239,7 @@
     // lastCtrl: who controlled the card just before (the caster of a spell, the controller of a permanent)
     toGraveyard(c, lastCtrl = c.owner) {
       const owner = this.P(c.owner);
+      if (c.whipped) { c.whipped = false; c.zone = 'exile'; owner.exile.push(c); return; } // Whip of Erebos
       if (c.info.shuffleBack) { c.zone = 'library'; owner.library.push(c); this.R.shuffle(owner.library); return; }
       // Valgavoth: "If a card you didn't control would be put into an opponent's graveyard, exile it instead"
       const voider = this.alive().find((q) => q !== owner && q.seat !== lastCtrl && this.has(q, 'voidExile'));
@@ -1422,7 +1427,7 @@
       { const sc = source || this.ctxSrc(); if (sc && sc.ctrl !== p.seat) this.credit(sc, 'dmg', n); }
       if (p.lostTurn !== this.turn) { p.lostTurn = this.turn; p.lostThis = 0; }
       p.lostThis += n;
-      for (const c of p.bf) for (const t of c.info.triggers) if (t.k === 'vilis' && (this._vilisDepth || 0) < 2) { this._vilisDepth = (this._vilisDepth || 0) + 1; const vn = Math.min(n, Math.max(0, p.library.length - 3), 10); this.draw(p, vn); if (vn) this.emit('draw', `Vilis: ${p.name} draws ${vn}.`, { seat: p.seat, cards: [c.id] }); this._vilisDepth--; }
+      for (const c of p.bf) for (const t of c.info.triggers) if (t.k === 'vilis' && (this._vilisDepth || 0) < 2) { this._vilisDepth = (this._vilisDepth || 0) + 1; const vn = Math.min(n, Math.max(0, p.library.length - 3)); this.draw(p, vn); if (vn) this.emit('draw', `Vilis: ${p.name} draws ${vn}.`, { seat: p.seat, cards: [c.id] }); this._vilisDepth--; }
       this._lossDepth = (this._lossDepth || 0) + 1;
       if (this._lossDepth < 8) for (const q of this.opps(p)) for (const c of q.bf) for (const t of c.info.triggers) if (t.k === 'exquisite') this.gainLife(q, n, c);
       this._lossDepth--;
@@ -1621,8 +1626,9 @@
     sacrifice(p, c, outlet) {
       const so = outlet.info.sacOutlet;
       if (so.tribes && !so.tribes.some((t) => this.isType(c, t))) return false;
-      if (so.mana && !this.pay(p, parseCost(String(so.mana)))) return false;
-      if (so.mana) this.pay(p, parseCost(String(so.mana)), 0, true);
+      const soCost = so.cost || parseCost(String(so.mana || ''));
+      if (so.mana && !this.pay(p, soCost)) return false;
+      if (so.mana) this.pay(p, soCost, 0, true);
       if (so.life) this.loseLife(p, so.life);
       if (so.tap) outlet.tapped = true;
       this._sacPower = this.power(c);
@@ -1724,6 +1730,7 @@
         const m = c.info.mana;
         if (!m || c.tapped) continue;
         if (this.karnStops(p, c)) continue;
+        if (c.info.name === 'Temple of the False God' && p.bf.filter((x) => x.info.isLand).length < 5) continue;
         if (c.info.isCreature && c.sick && !this.hasKw(c, 'haste') && !this.has(p, 'elixir')) continue;
         let opts = m.opts;
         if (c.info.cradle) { const n = p.bf.filter((x) => x.info.isCreature).length; if (!n) continue; opts = [{ colors: ['G'], amount: n, dmg: 0 }]; }
@@ -1904,7 +1911,7 @@
           if (l) { this.removeFrom(q.hand, l); this.enterBattlefield(l, q, { quiet: true }); this.emit('land', `Archaeomancer's Map: ${q.name} puts ${l.info.name} onto the battlefield.`, { seat: q.seat, cards: [l.id] }); }
         }
         for (const g of [...p.gy]) if (g.info.gyLandfall) { this.removeFrom(p.gy, g); this.enterBattlefield(g, p, { quiet: true }); this.emit('reanimate', `${g.info.name} returns from the graveyard (landfall).`, { seat: p.seat, cards: [g.id] }); }
-        if (c.info.shock) { if (this.canPayLife(p, 2) && p.life > 12) this.loseLife(p, 2); else c.tapped = true; }
+        if (c.info.shock) { const n = /pay 3 life/i.test(c.info.text || '') ? 3 : 2; if (this.canPayLife(p, n) && p.life > 12 && this.wantUntappedLand(p, c)) this.loseLife(p, n); else c.tapped = true; }
         if (c.info.fetch) {
           const ok = (land) => land.info.isLand && c.info.fetch.types.some((tp) => tp === 'basic land' ? land.info.types.has('Basic') : tp === 'land' ? true : land.info.subtypes.includes(cap(tp)) || (tp.includes('basic') && land.info.types.has('Basic')));
           const want = p.library.filter(ok);
@@ -1914,7 +1921,7 @@
             this.removeFrom(p.library, pick); this.R.shuffle(p.library);
             this.moveToGraveyard(c);
             if (/pay 1 life/i.test(c.info.text)) this.loseLife(p, 1);
-            this.enterBattlefield(pick, p, { tapped: c.info.fetch.tapped, quiet: true });
+            this.enterBattlefield(pick, p, { tapped: c.info.fetch.tapped && !(/four or more lands/i.test(c.info.text || '') && p.bf.filter((x) => x.info.isLand).length >= 4), quiet: true });
             if (!o.quiet) this.emit('land', `${p.name} cracks ${c.info.name} for ${pick.info.name}.`, { seat: p.seat, cards: [pick.id] });
           }
           return;
@@ -2171,6 +2178,7 @@
             if (fx.comp === 'life' && pw > 0) { this.gainLife(owner, pw); this.emit('life', `${owner.name} gains ${pw} life (Swords to Plowshares).`, { seat: owner.seat }); }
             if (fx.comp === 'land') { const l = owner.library.find((x) => x.info.isLand && x.info.types.has('Basic')); if (l) { this.removeFrom(owner.library, l); this.R.shuffle(owner.library); this.enterBattlefield(l, owner, { tapped: true, quiet: true }); this.emit('ramp', `${owner.name} searches for ${l.info.name} (Path to Exile).`, { seat: owner.seat, cards: [l.id] }); } }
           }
+          else if (fx.destroyComp) { if (this.destroy(tgt)) { const l = owner.library.find((x) => x.info.isLand && x.info.types.has('Basic')); if (l) { this.removeFrom(owner.library, l); this.R.shuffle(owner.library); this.enterBattlefield(l, owner, { quiet: true }); this.emit('ramp', `${owner.name} searches for ${l.info.name} (Assassin's Trophy).`, { seat: owner.seat, cards: [l.id] }); } } verb = 'destroys'; }
           else { const tough = this.toughness(tgt); if (!this.destroy(tgt)) { this.emit('removal', `${tgt.info.name} survives.`, { seat: p.seat, cards: [tgt.id] }); break; } verb = 'destroys'; if (fx.gainToughness) this.gainLife(p, tough); }
           break;
         }
@@ -2231,12 +2239,15 @@
           break;
         }
         case 'tutorBF': {
-          const crs = p.library.filter((c) => c.info.isCreature && c.info.mv <= Math.max(xVal, 3)).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a));
+          const gsz = src && src.info.name === "Green Sun's Zenith";
+          const crs = p.library.filter((c) => c.info.isCreature && c.info.mv <= (gsz ? xVal : Math.max(xVal, 3)) && (!gsz || c.info.colors.has('G'))).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a));
           if (crs[0]) { this.removeFrom(p.library, crs[0]); this.R.shuffle(p.library); this.enterBattlefield(crs[0], p); this.emit('tutor', `${p.name} puts ${crs[0].info.name} onto the battlefield.`, { seat: p.seat, cards: [crs[0].id] }); }
           break;
         }
         case 'regrow': {
-          const c = p.gy.filter((x) => !x.info.isLand).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0];
+          const fewLands = p.bf.filter((x) => x.info.isLand).length < 5;
+          const val = (x) => (x.info.isLand ? (fewLands || x.info.cradle || x.info.coffers ? 6 : 0) : this.cardValue(p, x));
+          const c = p.gy.filter((x) => !x.info.isLand || val(x) > 0).sort((a, b) => val(b) - val(a))[0];
           if (c) { this.removeFrom(p.gy, c); c.zone = 'hand'; p.hand.push(c); this.emit('effect', `${p.name} returns ${c.info.name} to hand.`, { seat: p.seat, cards: [c.id] }); }
           break;
         }
@@ -2261,6 +2272,7 @@
             if (src && src.info.reanimAura && src.zone === 'bf') src.attached = c.id;
             this.enterBattlefield(c, p, { announce: () => this.emit('reanimate', `${p.name} reanimates ${c.info.name}${c.owner !== p.seat ? ' from ' + this.P(c.owner).name + "'s graveyard" : ''}${src ? ` with ${src.info.name}` : ''}.`, { seat: p.seat, cards: [c.id] }) });
             if (fx.loseMv) this.loseLife(p, c.info.mv);
+            if (fx.whip && c.zone === 'bf') { c.whipped = true; c.eot.kw.push('haste'); c.sick = false; (p.whipExile = p.whipExile || []).push(c); }
             if (fx.zombie && c.zone === 'bf' && !(c.info.subtypes || []).includes('Zombie')) this.setInfo(c, { subtypes: [...(c.info.subtypes || []), 'Zombie'] });
           }
           break;
@@ -2298,7 +2310,7 @@
           break;
         }
         case 'overrun': {
-          const crs = p.bf.filter((c) => c.info.isCreature);
+          const crs = p.bf.filter((c) => c.info.isCreature && (!fx.notSub || !this.isType(c, fx.notSub)));
           const n = crs.length;
           for (const c of crs) { c.eot.p += fx.p === 'X' ? n : fx.p; c.eot.t += fx.t === 'X' ? n : fx.t; c.eot.kw.push(...fx.kw); }
           const bump = fx.p === 'X' || fx.p || fx.t ? `+${fx.p === 'X' ? n : fx.p}/+${fx.t === 'X' ? n : fx.t}` : '';
@@ -2436,6 +2448,16 @@
           break;
         }
         case 'loseSelf': this.loseLife(p, X(fx.n)); break;
+        case 'agadeem': {
+          // any number of creature cards with different mana values, each X or less
+          const got = [];
+          for (let mv = Math.max(0, xVal); mv >= 0; mv--) {
+            const c = p.gy.filter((x) => x.info.isCreature && !x.isCommander && x.info.mv === mv).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0];
+            if (c) { this.removeFrom(p.gy, c); this.enterBattlefield(c, p, { quiet: true }); got.push(c); }
+          }
+          this.emit('reanimate', `${name}: ${p.name} returns ${got.length ? this.listNames(got.map((c) => c.info.name)) : 'nothing'}.`, { seat: p.seat, cards: got.map((c) => c.id) });
+          break;
+        }
         case 'emptyLibraryWin': if (!p.library.length) { this.emit('combo', `${name}: ${p.name}'s library is empty, so they win!`, { seat: p.seat }); for (const q of this.opps(p)) this.lose(q, 'Jace, Wielder of Mysteries'); this.checkState(); } break;
         case 'selfIndestructible': if (src && src.zone === 'bf') src.indestructibleEOT = true; break;
         case 'minusCounter': {
@@ -2676,7 +2698,7 @@
         }
         case 'wildspeaker': {
           const ready = p.bf.filter((c) => c.info.isCreature && !c.sick && !c.tapped).length;
-          if (ready >= 3) this.resolveEffect(p, { k: 'overrun', p: 3, t: 3, kw: [] }, src, 0, false);
+          if (ready >= 3) this.resolveEffect(p, { k: 'overrun', p: 3, t: 3, kw: [], notSub: 'Human' }, src, 0, false);
           else { const n = Math.max(0, ...p.bf.filter((c) => c.info.isCreature && !this.isType(c, 'Human')).map((c) => this.power(c))); this.draw(p, n); this.emit('draw', `${name}: ${p.name} draws ${n}.`, { seat: p.seat }); }
           break;
         }
@@ -2970,6 +2992,8 @@
       }).sort((a, b) => b.v - a.v);
       return scored[0].c;
     }
+    // worth paying life for an untapped land only if something castable now needs the mana
+    wantUntappedLand(p, c) { if (!this.started || p.seat !== this.active) return false; c.tapped = false; const now = this.castOptions(p).length; c.tapped = true; const before = this.castOptions(p).length; c.tapped = false; return now > before; }
     bestLandFrom(p, lands) { return lands.slice().sort((a, b) => this.landValue(p, b) - this.landValue(p, a))[0]; }
     cardValue(p, c) {
       const i = c.info;
@@ -3585,10 +3609,17 @@
         if (this.has(p, 'necro')) { /* skip draw */ } else this.draw(p, 1);
         this.inDrawStep = false;
         if (p.bf.some((c) => c.name === 'Sylvan Library') && p.library.length >= 2) {
-          const two = p.library.splice(0, 2);
-          const keep = p.life > 20 && this.canPayLife(p, 4) ? 1 : 0;
-          for (let i = 0; i < two.length; i++) { const c = two[i]; if (i < keep) { c.zone = 'hand'; p.hand.push(c); this.loseLife(p, 4); } else { c.zone = 'library'; p.library.unshift(c); } }
-          this.emit('draw', `${p.name} looks at two extra cards with Sylvan Library${keep ? ' and pays 4 life to keep one' : ''}.`, { seat: p.seat });
+          const before = new Set(p.hand);
+          this.draw(p, 2);
+          const drawn = p.hand.filter((c) => !before.has(c));
+          // of all the cards drawn this turn, keep the best; for each of the two extra we keep, pay 4 life
+          const thisTurn = drawn.concat(p.hand.filter((c) => before.has(c)).slice(-1));
+          const ranked = thisTurn.slice().sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a));
+          let paid = 0;
+          const back = ranked.slice(1).filter((c) => { if (this.cardValue(p, c) >= 8 && this.canPayLife(p, 4 * (paid + 1)) && p.life > 20) { paid++; return false; } return true; }).slice(0, 2);
+          for (const c of back.reverse()) { this.removeFrom(p.hand, c); c.zone = 'library'; p.library.unshift(c); }
+          if (paid) this.loseLife(p, 4 * paid);
+          this.emit('draw', `Sylvan Library: ${p.name} draws two extra and ${paid ? `pays ${4 * paid} life to keep ${paid}` : 'puts two back'}.`, { seat: p.seat });
         }
       }
       if (this.has(p, 'necro') && p.life > 14 && this.canPayLife(p, 1)) { const n = Math.min(p.life - 14, 6, Math.max(0, Math.floor(p.life - this.lifeFloor(p) - 1)));
@@ -3633,6 +3664,8 @@
         if (c.dashed) { c.dashed = false; this.bounce(c); }
       }
       if (p.delayedReturn && p.delayedReturn.length) { for (const c of p.delayedReturn) if (c.zone === 'gy') { this.removeFrom(this.P(c.owner).gy, c); this.enterBattlefield(c, p, { quiet: true }); } p.delayedReturn = []; }
+      // Whip of Erebos: the returned creature is exiled at the beginning of the next end step
+      if (p.whipExile && p.whipExile.length) { for (const c of p.whipExile) if (c.zone === 'bf') { this.emit('effect', `Whip of Erebos exiles ${c.info.name}.`, { seat: p.seat, cards: [c.id] }); this.exileCard(c); } p.whipExile = []; }
       // cards exiled "until end of turn you may play" that weren't played go away
       for (const c of [...p.hand]) if (c.impulseTurn === this.turn) { this.removeFrom(p.hand, c); c.zone = 'exile'; p.exile.push(c); c.impulseTurn = null; }
       if (p.necroPending && p.necroPending.length) { for (const c of p.necroPending) { c.zone = 'hand'; p.hand.push(c); } p.necroPending = []; }
@@ -3798,7 +3831,7 @@
           case 'discard': return this.opps(p).some((q) => q.hand.length > 0);
           case 'counter': return false;
           case 'landDestroy': return this.opps(p).some((q) => q.bf.some((x) => x.info.isLand && !x.info.types.has('Basic') && (x.info.cradle || x.info.coffers || this.landValue(q, x) > 3)));
-          case 'squirrelKill': return true;
+          case 'squirrelKill': { const sq = p.bf.filter((x) => x.token && this.isType(x, 'Squirrel')).length; return !!this.bestOppTarget(p, (x) => x.info.isCreature && this.targetable(x, p) && this.toughness(x) <= sq && this.creatureValue(x) >= 6); }
           case 'feldon': return p.gy.some((x) => x.info.isCreature && this.creatureValue({ ...x, p1: 0, eot: { p: 0, t: 0, kw: [] }, ctrl: p.seat, info: x.info }) > 6);
           case 'osgir': return p.gy.some((x) => x.info.types.has('Artifact') && x.info.isPermanent && x.info.mv <= this.availableMana(p));
           case 'reanimateArtifact': case 'weld': return p.gy.some((x) => x.info.types.has('Artifact'));
@@ -3841,7 +3874,7 @@
         if (fodder.length < ab.sacArtifact || fodder.some((x) => this.permValue(x) > 8)) return null;
       }
       if (ab.sacCreature) {
-        fodder = this.sacFodder(p, c).slice(0, ab.sacCreature);
+        fodder = this.sacFodder(p, c).filter((x) => !ab.sacColor || x.info.colors.has(ab.sacColor)).slice(0, ab.sacCreature);
         if (fodder.length < ab.sacCreature) return null;
       }
       if (ab.sacArtifactN && !ab.sacArtifact) {
@@ -4119,7 +4152,11 @@
     }
 
     equipStuff(p) {
-      for (const eq of p.bf.filter((c) => c.info.isEquipment)) {
+      // Skullclamp-style equipment goes round again after the creature it killed is gone (draw 2 each time)
+      const list = p.bf.filter((c) => c.info.isEquipment);
+      for (const e of list.slice()) if (e.info.statics.some((x) => x.k === 'equipBuff' && (x.t || 0) < 0)) for (let k = 0; k < 4; k++) list.push(e);
+      for (const eq of list) {
+        if (eq.zone !== 'bf' || this.over || p.lost) continue;
         // Skullclamp-style (-toughness): on a creature it kills, the cheaper the better (it draws when that creature dies)
         const shrink = Math.min(0, ...eq.info.statics.filter((x) => x.k === 'equipBuff').map((x) => x.t || 0));
         const crs = p.bf.filter((c) => c.info.isCreature && !this.pacified(c));
@@ -4429,6 +4466,7 @@
       if (this.hasKw(a, 'lifelink')) ll.push(dealt);
       this._combatDefender = q;
       for (const g of p.bf) if (g.info.triggers.some((t) => t.k === 'gnawbone')) this.addToken(p, { treasure: true }, n, false);
+      if (dealt) for (const t of p.bf) if (t.info.toski) { this.draw(p, 1); this.emit('draw', `Toski: ${this.cname(a)} hit ${q.name}, ${p.name} draws a card.`, { seat: p.seat, cards: [t.id] }); }
       if (a.info.combatDmg.length) this.resolveEffects(p, a.info.combatDmg, a, null, true);
       for (const eq of p.bf) if (eq.attached === a.id && eq.info.combatDmg.length) this.resolveEffects(p, eq.info.combatDmg, eq, null, true);
     }
