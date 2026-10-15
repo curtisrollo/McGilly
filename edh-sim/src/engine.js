@@ -590,6 +590,8 @@
   const SCRIPTS = {
     'Academy Rector': (a, cover) => { a.dies = [{ k: 'rectorExile' }, { k: 'search', n: 1, what: 'enchantment', dest: 'bf', needsRector: true }]; cover(/dies/); },
     'Sun Titan': (a, cover) => { a.etb = [{ k: 'reanimate', any: false, mvMax: 3, perm: true, lands: true }]; a.attack = [{ k: 'reanimate', any: false, mvMax: 3, perm: true, lands: true }]; cover(ALL); },
+    'Vindicate': (a, cover) => { a.spell = [{ k: 'removal', what: 'permanent' }]; cover(ALL); },
+    'Angel of Despair': (a, cover) => { a.etb = [{ k: 'removal', what: 'permanent' }]; cover(ALL); },
     'Patron of the Vein': (a, cover) => { a.deathWatch = a.deathWatch.map((w) => ({ ...w, fx: [{ k: 'exileDead' }, ...w.fx] })); cover(ALL); },
     'Arena Rector': (a, cover) => { a.dies = []; a.dies.push({ k: 'search', n: 1, what: 'planeswalker', dest: 'bf' }); cover(/dies/); },
     'Ajani Steadfast': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'pump', p: 1, t: 1, kw: ['first strike', 'vigilance', 'lifelink'] }]; a.loyaltyAbs[1].fx = [{ k: 'counters', n: 1, on: 'each' }, { k: 'loyaltyEach', other: true }]; a.loyaltyAbs[2].fx = [{ k: 'emblem', e: 'damageCap1' }]; cover(ALL); },
@@ -1108,6 +1110,7 @@
       if (c.hexproofEOT) s.add('hexproof');
       if (c.info.statics.some((x) => x.k === 'myrkul') && ctrl.life <= 20) s.add('indestructible');
       if (c.info.hasteIfOppLow && this.opps(ctrl).some((q) => q.life <= c.info.hasteIfOppLow)) s.add('haste');
+      if (c.hallHaste) s.add('haste'); // Hall of the Bandit Lord
       if (c.info.types.has('Artifact') && c.info.isCreature && ctrl.bf.some((x) => x !== c && x.info.statics.some((st) => st.k === 'artifactHaste'))) s.add('haste');
       if (c.info.types.has('Enchantment') && this.statics(ctrl, 'enchShroud').some(({ c: src }) => src !== c)) s.add('shroud');
       if (this.statics(ctrl, 'enchShroud').some(({ s: st }) => st.enchantedToo) && ctrl.bf.some((a) => a.attached === c.id && a.info.isAura)) s.add('shroud');
@@ -1247,7 +1250,7 @@
       c.zone = 'gy'; owner.gy.push(c);
       if (c.info.isLand) { if (this._landBatch) this._landBatch.add(owner.seat); else for (const x of owner.bf) for (const t of x.info.triggers) if (t.k === 'landToGy') this.resolveEffects(owner, t.fx, x, null, false); }
     }
-    discardCard(p, c) { this.removeFrom(p.hand, c); this.toGraveyard(c); }
+    discardCard(p, c) { this.removeFrom(p.hand, c); if (this.has(p, 'necro')) { c.zone = 'exile'; p.exile.push(c); return; } this.toGraveyard(c); }
     discardWorst(p, n = 1) { for (let i = 0; i < n && p.hand.length; i++) { const d = p.hand.slice().sort((a, b) => this.cardValue(p, a) + this.nnAdv(p, a) * 40 - this.cardValue(p, b) - this.nnAdv(p, b) * 40)[0]; this.discardCard(p, d); } }
     mill(p, n) {
       const out = [];
@@ -1282,7 +1285,7 @@
         const tgt = this.cards[c.attached]; if (tgt && tgt.zone === 'bf') this.destroy(tgt, 'sacrificed', true);
       }
       c.attached = null; c.tapped = false; c.p1 = 0; c.dmg = 0; c.dt = false; c.eot = { p: 0, t: 0, kw: [] }; c.ctrl = c.owner; c.loyalty = 0; c.indestructibleEOT = false; c.hexproofEOT = false;
-      c.copiedFrom = null; c.copyPlusOne = false; c.indCounter = false; c.neutralized = 0; c.frozenUntil = 0; c.charge = 0; c.harnessed = false; c.transformed = false; c.chosenType = null; c.age = 0; c.prepared = false; c.animatedBy = null;
+      c.copiedFrom = null; c.copyPlusOne = false; c.indCounter = false; c.neutralized = 0; c.frozenUntil = 0; c.charge = 0; c.harnessed = false; c.transformed = false; c.chosenType = null; c.age = 0; c.prepared = false; c.animatedBy = null; c.hallHaste = false;
       this.restoreInfo(c);
     }
 
@@ -1696,7 +1699,7 @@
       for (const src of [...p.bf]) for (const t of src.info.triggers) {
         if (this.over || p.lost) return;
         if (t.k === 'terror' && src !== c && src.zone === 'bf') { const n = this.power(c); if (n > 0) this.dealDamageAny(p, n, src, c.info.name + ' entered'); }
-        if (t.k === 'dragonTempest' && (c.info.subtypes || []).includes('Dragon')) { const n = p.bf.filter((x) => (x.info.subtypes || []).includes('Dragon')).length; this.dealDamageAny(p, n, src, 'Dragon Tempest'); }
+        if (t.k === 'dragonTempest' && (c.info.subtypes || []).includes('Dragon')) { const n = p.bf.filter((x) => (x.info.subtypes || []).includes('Dragon')).length; this.dealDamageAny(p, n, c, 'Dragon Tempest'); }
         if (t.k === 'flyHaste' && this.hasKw(c, 'flying')) c.eot.kw.push('haste');
       }
     }
@@ -2807,7 +2810,7 @@
       if (fx.what !== 'lands' && fx.what !== 'big') for (const q of this.alive()) if (!prot.has(q.seat)) this.sacBeforeWipe(q);
       for (const q of this.alive()) if (q !== p && this.tryProtect(q, q.bf.filter((c) => c.info.isCreature || fx.what === 'nonland'), p, true)) prot.add(q.seat);
       for (const q of this.alive()) {
-        if (prot.has(q.seat)) continue;
+        if (q.protectedUntil >= this.turn) continue; // Teferi's Protection: phased out
         for (const c of [...q.bf]) {
           let hit = false;
           if (fx.what === 'creatures') hit = c.info.isCreature && !(fx.spare && this.isType(c, fx.spare));
@@ -2876,7 +2879,7 @@
     }
     // Mother of Runes / Giver of Runes protect a creature from a targeted spell
     runesSave(owner, tgt) {
-      if (!tgt.info.isCreature || this.abolished(owner)) return false;
+      if (!tgt.info.isCreature || this.abolished(owner, 'ability')) return false;
       const m = owner.bf.find((c) => c.info.runes && !c.tapped && !c.sick && (!c.info.runes.another || c !== tgt));
       if (!m) return false;
       m.tapped = true;
@@ -2888,24 +2891,31 @@
       const value = threatened.reduce((s, c) => s + this.permValue(c), 0);
       if (value < (wipe ? 12 : 14)) return false;
       if (this.abolished(q)) return false;
-      const card = q.hand.find((c) => ((c.info.spell && c.info.spell.some((f) => f.k === 'protect' && (!f.single || !wipe || (c.info.kickerProtectAll && this.pay(q, { ...c.info.cost, generic: c.info.cost.generic + c.info.kickerProtectAll.generic, pips: c.info.cost.pips.concat(c.info.kickerProtectAll.pips) }))))) || c.info.modalProtect) && this.pay(q, c.info.cost));
+      const card = q.hand.find((c) => ((c.info.spell && c.info.spell.some((f) => f.k === 'protect' && (!f.single || !wipe || (c.info.kickerProtectAll && this.pay(q, { ...c.info.cost, generic: c.info.cost.generic + c.info.kickerProtectAll.generic, pips: c.info.cost.pips.concat(c.info.kickerProtectAll.pips) }))))) || c.info.modalProtect) && this.pay(q, this.costFor(q, c, 'hand')));
       if (!card) return false;
       if (card.info.kickerProtectAll && wipe) this.pay(q, { ...card.info.cost, generic: card.info.cost.generic + card.info.kickerProtectAll.generic, pips: card.info.cost.pips.concat(card.info.kickerProtectAll.pips) }, 0, true);
-      else this.pay(q, card.info.cost, 0, true);
+      else this.pay(q, this.costFor(q, card, 'hand'), 0, true);
       this.removeFrom(q.hand, card);
       if (/exile teferi's protection|exile cardname/i.test(card.info.text || '')) { card.zone = 'exile'; q.exile.push(card); } else this.toGraveyard(card, q.seat);
       if (card.info.spell.some((f) => f.single) && !wipe) { const t = threatened[0]; if (t) this.phaseOut(t, null); this.emit('response', `${q.name} phases out ${t ? t.info.name : 'a creature'} with ${card.info.name}!`, { seat: q.seat, cards: [card.id] }); return true; }
       if (card.info.spell.some((f) => f.single) && wipe) { for (const c of q.bf.filter((x) => x.info.isCreature)) this.phaseOut(c, null); this.emit('response', `${q.name} kicks ${card.info.name} and phases out their creatures!`, { seat: q.seat, cards: [card.id] }); return true; }
       if (/phase out|protection from everything/i.test(card.info.text)) q.protectedUntil = this.turn + this.alive().length - 1;
-      for (const c of q.bf) { c.indestructibleEOT = true; c.hexproofEOT = true; }
+      // only what the card grants: Flawless Maneuver (creatures, indestructible), Boros Charm (permanents, indestructible),
+      // Heroic Intervention (permanents, hexproof and indestructible), Teferi's Protection (phases everything out)
+      const txt = (card.info.text || '').toLowerCase();
+      const onlyCreatures = /creatures you control gain/.test(txt) && !/permanents you control/.test(txt);
+      const grantsInd = /indestructible/.test(txt) || /phase out|protection from everything/.test(txt);
+      const grantsHex = /hexproof/.test(txt) || /phase out|protection from everything/.test(txt);
+      for (const c of q.bf) if (!onlyCreatures || c.info.isCreature) { if (grantsInd) c.indestructibleEOT = true; if (grantsHex) c.hexproofEOT = true; }
       this.emit('response', `${q.name} responds with ${card.info.name}!`, { seat: q.seat, cards: [card.id] });
       return true;
     }
 
-    abolished(q) {
-      // Grand Abolisher: q cannot cast spells during the active player's turn
+    abolished(q, kind = 'spell') {
+      // Grand Abolisher: q can't cast spells or activate abilities during the active player's turn
       const act = this.P(this.active);
       if (act !== q && this.has(act, 'abolisher')) return true;
+      if (kind === 'ability') return false; // Silence and Teferi, Time Raveler only stop spells
       // Teferi, Time Raveler: opponents may only cast at sorcery speed; Silence: no spells this turn
       if (this.opps(q).some((o) => this.has(o, 'raveler'))) return true;
       if (q.silencedTurn === this.turn) return true;
@@ -3234,7 +3244,7 @@
         if (bleed && !this.canPayLife(p, bleed * 4)) return -1;
         if (pay) s -= Math.max(0, pay - (p.life - this.lifeFloor(p)) / 3);
       }
-      if (i.holdUnlessLethal) { const lethal = opp.some((q) => q.life <= 4); if (!lethal) return -1; s += 30; }
+      if (i.holdUnlessLethal) { const lethal = opp.some((q) => q.life <= this.scaleDamage(p.seat, q.seat, 4)); if (!lethal) return -1; s += 30; }
       if (i.redirect) return -1;
       if (from === 'citadel' || from === 'valgavoth') s += 4;
       if (from === 'dash') { if (!opp.length) return -1; s += 1; }
@@ -3282,6 +3292,7 @@
       if (overload && this.opps(p).some((q) => this.playerThreat(q) > 20)) cost = i.overload;
       const colorsSpent = new Set(this.sources(p).flatMap((x) => x.opts.flatMap((o) => o.colors))).size;
       if (!this.pay(p, cost, xVal, true)) return false;
+      if (i.isCreature && this.pendingMana && this.pendingMana.sources.some((id) => this.cards[id] && this.cards[id].info.name === 'Hall of the Bandit Lord')) c.hallHaste = true;
       // paying can set things off (Mana Confluence's life loss into an Exquisite Blood loop) that end the game
       if (p.lost || this.over) return true;
       let kicks = 0;
@@ -3298,6 +3309,7 @@
       if (sample) this.samples.push(sample);
       { const st = this.stats[c.id] || (this.stats[c.id] = { name: c.name, seat: c.owner }); if (st.cast == null) st.cast = this.round; }
       p.spellsThisTurn = (p.spellsThisTurn || 0) + 1;
+      if (!i.isCreature) p.nonCreatureSpells = (p.nonCreatureSpells || 0) + 1;
       if (!i.types.has('Artifact')) p.nonArtifactSpells = (p.nonArtifactSpells || 0) + 1;
       const fromTxt = { flashback: ' with flashback', command: ' from the command zone', gy: ' from the graveyard', citadel: ' off the top with Bolas\'s Citadel', top: ' off the top with Mystic Forge', valgavoth: ' from Valgavoth\'s exile', dash: ' for its dash cost' }[from] || '';
       this.emit('cast', `${p.name} casts ${i.name}${xVal ? ` (X=${xVal})` : ''}${kicks ? ` kicked ${kicks}×` : ''}${fromTxt}.`, { seat: p.seat, cards: [c.id], stack: [c.id], nnAdv: c._nnAdv });
@@ -3367,9 +3379,10 @@
       }
       // opponents' Rhystic Study / Esper Sentinel
       for (const q of this.opps(p)) for (const s of q.bf) for (const t of s.info.triggers) {
-        if (t.k === 'rhystic' || (t.k === 'sentinel' && !i.isCreature)) {
-          const spare = this.availableMana(p);
-          if (spare >= 1 && this.R() < 0.6) { this.pay(p, parseCost('1'), 0, true); continue; }
+        const firstNonCreature = t.k === 'sentinel' && !i.isCreature && (p.nonCreatureSpells || 0) === 1;
+        if (t.k === 'rhystic' || firstNonCreature) {
+          const tax = t.k === 'sentinel' ? Math.max(0, this.power(s)) : 1;
+          if (tax === 0 || (this.availableMana(p) >= tax && this.R() < 0.6 && this.pay(p, parseCost(String(tax))))) { if (tax) this.pay(p, parseCost(String(tax)), 0, true); continue; }
           this.draw(q, 1);
           this.emit('draw', `${q.name} draws off ${s.info.name}.`, { seat: q.seat, cards: [s.id] });
         }
@@ -3565,6 +3578,7 @@
       this.emptyPools();
       this.turn++;
       this.phase = 'untap';
+      for (const q of this.players) { q.nonCreatureSpells = 0; q.spellsThisTurn = 0; } // "each turn" counts restart for everyone
       p.landsPlayed = 0; p.gyCastTypes = new Set(); p.pool = 0; p.spellsThisTurn = 0; p.nonArtifactSpells = 0; p.walkerUses = 0; p.silencedBy = null;
       this.deathsThisTurn = 0;
       if (p.protectedUntil < this.turn) p.protectedUntil = -1;
@@ -3855,6 +3869,7 @@
       const elixir = this.has(p, 'elixir');
       if (c.zone !== 'bf') return null;
       if (this.karnStops(p, c)) return null;
+      if (c.info.name === 'Minas Tirith' && !(p.attackersTurn === this.turn && p.attackersCount >= 2)) return null;
       const myrkulOut = p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'));
       // Cinderhaze Wretch with Myrkul: the discard loop is the point, so it goes before combat instead of attacking
       const loopNow = ab.untapWithCounter && (myrkulOut || !c.info.isCreature) && this.opps(p).some((q) => q.hand.length);
@@ -4320,6 +4335,7 @@
         }
       }
       for (const a of attackers) { if (!this.hasKw(a, 'vigilance')) a.tapped = true; a.attacking = true; }
+      p.attackersTurn = this.turn; p.attackersCount = (p.attackersTurn === this.turn ? p.attackersCount || 0 : 0) + attackers.length;
       const atkInfo = attackers.map((a) => ({ id: a.id, to: assign.get(a.id) || null }));
       const atkNames = attackers.map((a) => { const w = assign.get(a.id); return `${this.cname(a)} ${this.power(a)}/${this.toughness(a)}${w ? ` → ${this.cards[w].info.name}` : ''}`; });
       this.emit('attack', `${p.name} attacks ${q.name} with ${this.listNames(atkNames)} (${attackers.reduce((s, a) => s + this.power(a), 0)} power).`, { seat: p.seat, cards: attackers.map((a) => a.id), attackers: atkInfo, target: q.seat });
@@ -4354,7 +4370,7 @@
       // Spore Frog style fogs when the hit would be big
       const incoming = attackers.filter((a) => a.zone === 'bf' && !blocks.has(a.id)).reduce((s2, a) => s2 + this.power(a), 0);
       const frog = q.bf.find((c) => c.info.fogSac);
-      if (frog && !this.abolished(q) && (incoming >= q.life || incoming >= 10)) { this.destroy(frog, 'sacrificed', true); this.fogTurn = this.turn; this.emit('response', `${q.name} sacrifices ${frog.info.name}: all combat damage this turn is prevented.`, { seat: q.seat, cards: [frog.id] }); }
+      if (frog && !this.abolished(q, 'ability') && (incoming >= q.life || incoming >= 10)) { this.destroy(frog, 'sacrificed', true); this.fogTurn = this.turn; this.emit('response', `${q.name} sacrifices ${frog.info.name}: all combat damage this turn is prevented.`, { seat: q.seat, cards: [frog.id] }); }
       // Osgir: sacrifice artifacts for +2/+0 on an unblocked attacker when it gets there
       const osg = p.bf.find((c) => c.info.osgirPump);
       if (osg) {
@@ -4384,18 +4400,19 @@
               const need = ak.has('deathtouch') ? 1 : Math.max(0, this.toughness(b) - b.dmg);
               const d = Math.min(dmg, need || dmg);
               const preventB = (b.neutralized && b.neutralized >= this.turn) || this.hasKw(b, 'emissary');
-              if (!preventB) { b.dmg += this.scaleDamage(p.seat, q.seat, d); if (ak.has('deathtouch')) b.dt = true; }
+              const dd = preventB ? 0 : this.scaleDamage(p.seat, q.seat, d);
+              if (!preventB) { b.dmg += dd; if (ak.has('deathtouch')) b.dt = true; }
               dmg -= d;
-              if (ak.has('lifelink')) lifelinkGain.push(d);
+              if (ak.has('lifelink')) lifelinkGain.push(dd);
               if (dmg <= 0) break;
             }
             if (dmg > 0 && ak.has('trample')) this.hitPlayer(p, q, a, dmg, lifelinkGain, (n) => (dealtToPlayer += n));
-            else if (dmg > 0 && bs.length) bs[0].dmg += dmg;
+            else if (dmg > 0 && bs.length) { const dd = this.scaleDamage(p.seat, q.seat, dmg); bs[0].dmg += dd; if (ak.has('lifelink')) lifelinkGain.push(dd); }
           } else {
             if (a.info.masterOfCruelties && a.enteredAttacking !== this.turn) { if (q.life > 1 && q.protectedUntil < this.turn) { this.loseLife(q, q.life - 1, a); this.emit('combo', `Master of Cruelties goes unblocked: ${q.name}'s life total becomes 1!`, { seat: p.seat, cards: [a.id], target: q.seat }); } continue; }
             const wid = assign.get(a.id);
             const w = wid && this.cards[wid];
-            if (w && w.zone === 'bf') { w.loyalty -= this.scaleDamage(p.seat, q.seat, dmg); if (ak.has('lifelink')) lifelinkGain.push(dmg); if (w.vraskaShield != null) { this.destroy(a); this.emit('removal', `Vraska destroys ${a.info.name}.`, { seat: q.seat, cards: [a.id] }); } }
+            if (w && w.zone === 'bf') { const dd = this.scaleDamage(p.seat, q.seat, dmg); w.loyalty -= dd; if (ak.has('lifelink')) lifelinkGain.push(dd); if (w.vraskaShield != null) { this.destroy(a); this.emit('removal', `Vraska destroys ${a.info.name}.`, { seat: q.seat, cards: [a.id] }); } }
             else this.hitPlayer(p, q, a, dmg, lifelinkGain, (n) => (dealtToPlayer += n));
           }
         }
@@ -4443,7 +4460,7 @@
       if (fromCreature && this.has(q, 'emissary')) return 0;
       if ((q.emblems || []).includes('damageCap1')) dmg = Math.min(dmg, 1);
       const giant = q.bf.find((c) => c.info.statics.some((x) => x.k === 'palisade'));
-      if (giant && dmg > 0) { giant.dmg += dmg; this.checkState(); return 0; }
+      if (giant && dmg > 0) { giant.dmg += dmg; this._redirected = dmg; this.checkState(); return 0; } // still dealt (to the Giant): lifelink counts it
       return dmg;
     }
     sowerEcho(q, n) {
@@ -4452,8 +4469,9 @@
     hitPlayer(p, q, a, dmg, ll, tally) {
       if (q.lost) return;
       if (q.protectedUntil >= this.turn) return;
+      this._redirected = 0;
       dmg = this.preventPlayerDamage(q, this.scaleDamage(p.seat, q.seat, dmg), true);
-      if (!dmg) return;
+      if (!dmg) { if (this._redirected && this.hasKw(a, 'lifelink')) ll.push(this._redirected); return; }
       this._combatDealt = dmg;
       if (this.isType(a, 'Human') && this.has(q, 'humanBane')) { this.destroy(a); }
       this.sowerEcho(q, dmg);

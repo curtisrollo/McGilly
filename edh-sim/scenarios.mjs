@@ -594,4 +594,70 @@ export default [
       return { ok: !!c && c.mv === 4 && c.pips.length === 2, note: JSON.stringify(c) };
     },
   },
+  {
+    card: 'Esper Sentinel', title: "triggers only on an opponent's first noncreature spell each turn",
+    wrong: 'it triggered on every noncreature spell and always asked for {1}',
+    run({ table, put, card }) {
+      const g = table(); const [me, opp] = g.players; put(g, opp, 'Esper Sentinel'); g.R = Object.assign(() => 0.99, g.R);
+      const h0 = opp.hand.length;
+      for (const n of ['Sol Ring', 'Arcane Signet']) { const c = card(g, me, n, 'hand'); g.castSpell(me, c, 'hand'); }
+      return { ok: opp.hand.length === h0 + 1, note: `opponent drew ${opp.hand.length - h0}` };
+    },
+  },
+  {
+    card: 'Flawless Maneuver', title: 'saves creatures only, and against an exile wipe it does nothing',
+    wrong: 'it made every permanent indestructible and hexproof, and a protected player was skipped by any wipe (even exile)',
+    run({ table, put, card }) {
+      const g = table(); const [me, opp] = g.players; put(g, opp, 'Edgar Markov').isCommander = true; for (let i = 0; i < 3; i++) put(g, opp, 'Craterhoof Behemoth');
+      card(g, opp, 'Flawless Maneuver', 'hand'); const tithe = put(g, opp, 'Smothering Tithe');
+      g.doWipe(me, { k: 'wipe', what: 'farewell', exile: true }, null, 0);
+      return { ok: !opp.bf.some((c) => c.name === 'Craterhoof Behemoth'), note: `${opp.bf.filter((c) => c.name === 'Craterhoof Behemoth').length} Craterhoofs survived an exile wipe` };
+    },
+  },
+  {
+    card: 'Silence', title: "stops spells but not activated abilities (Mother of Runes still works)",
+    wrong: 'Silence also switched off abilities',
+    run({ table }) {
+      const g = table(); const [me, opp] = g.players; opp.silencedTurn = g.turn;
+      return { ok: g.abolished(opp, 'spell') && !g.abolished(opp, 'ability'), note: '' };
+    },
+  },
+  {
+    card: 'Minas Tirith', title: 'draws only if you attacked with two or more creatures this turn',
+    wrong: 'it drew whenever it had mana',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const m = put(g, me, 'Minas Tirith');
+      const before = !!g.prepareAbility(me, m, m.info.activated[0], true);
+      me.attackersTurn = g.turn; me.attackersCount = 2;
+      const after = !!g.prepareAbility(me, m, m.info.activated[0], true);
+      return { ok: !before && after, note: `without attacking ${before}, after attacking with 2 ${after}` };
+    },
+  },
+  {
+    card: 'Vindicate', title: 'can destroy a land (any permanent)',
+    wrong: 'it could only hit nonland permanents',
+    run({ table, put }) {
+      const g = table(); const v = put(g, g.players[0], 'Vindicate');
+      return { ok: v.info.spell[0].what === 'permanent', note: v.info.spell[0].what };
+    },
+  },
+  {
+    card: 'Necropotence', title: 'cards you discard are exiled',
+    wrong: 'discards went to the graveyard',
+    run({ table, put, card }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Necropotence'); const c = card(g, me, 'Sol Ring', 'hand');
+      g.discardCard(me, c);
+      return { ok: c.zone === 'exile', note: c.zone };
+    },
+  },
+  {
+    card: 'Fiery Emancipation', title: 'lifelink gains the tripled damage, even when Palisade Giant takes it instead of the player',
+    wrong: 'lifelink counted unmultiplied damage, and damage redirected to Palisade Giant gained nothing',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; put(g, me, 'Fiery Emancipation'); const v = put(g, me, 'Vampire Nighthawk');
+      for (const q of g.players.slice(1)) put(g, q, 'Palisade Giant');
+      const l0 = me.life; g._forceAttack = true; g.combat(me); g._forceAttack = false;
+      return { ok: me.life - l0 >= 6, note: `gained ${me.life - l0}` };
+    },
+  },
 ];
