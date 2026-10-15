@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { parseDeck } from './fetch-cards.mjs';
+import SCENARIOS from './scenarios.mjs';
 const require = createRequire(import.meta.url);
 const { Game, parseCost } = require('./src/engine.js');
 
@@ -445,11 +446,17 @@ scen('combat', 'a big creature does not attack into an untapped deathtouch block
   return { ok: big.zone === 'bf' && !big.tapped, note: big.tapped ? 'attacked' : '' };
 });
 
+// ---------- the scenario library (scenarios.mjs): past mistakes and the correct result ----------
+for (const sc of SCENARIOS) {
+  if (only && only !== sc.card) continue;
+  staticCheck(sc.card, sc.title, () => { const r = sc.run({ table, put, card, addLand, populate, Game, db, decks }); return { ...r, note: (r.ok ? '' : `was wrong before: ${sc.wrong}. `) + (r.note || '') }; });
+}
+
 // ---------- report ----------
 const fails = results.filter((r) => !r.ok);
 const cards = new Set(results.map((r) => r.card));
 const failCards = new Set(fails.map((r) => r.card));
-for (const r of fails) console.log(`FAIL  ${r.card} — ${r.test}: expected ${r.failed.join(', ')} to show an effect. ${r.note}`);
+for (const r of fails) console.log(r.failed.includes('static') ? `FAIL  ${r.card} — ${r.test}. ${r.note}` : `FAIL  ${r.card} — ${r.test}: expected ${r.failed.join(', ')} to show an effect. ${r.note}`);
 console.log(`\n${results.length} checks on ${cards.size} cards: ${results.length - fails.length} passed, ${fails.length} failed (${failCards.size} cards).`);
 if (jsonOut) fs.writeFileSync(jsonOut, JSON.stringify({ when: new Date().toISOString(), checks: results.length, cards: cards.size, passed: results.length - fails.length, failed: fails.length, results }));
 process.exitCode = fails.length ? 1 : 0;
