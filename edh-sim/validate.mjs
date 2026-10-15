@@ -151,7 +151,7 @@ const EXPECT = {
   sorinSac: (a, b) => b.me.life > a.me.life, squirrelKill: () => true, defenseOfHeart: () => true, sacCreatureOrSelf: (a, b) => b.me.bf < a.me.bf,
   gitrogUpkeep: (a, b) => b.me.bf < a.me.bf, coffin: () => true, ebonLegion: () => true, archfiend: () => true, balefire: () => true,
   lordOfVoid: () => true, ragavan: () => true, stealArtifacts: () => true, edictThat: () => true, millPower: () => true,
-  winIfArtifacts: () => true, vraskaShield: (a, b) => b.me.shields > a.me.shields, noop: () => true, protect: () => true, counter: () => true,
+  winIfArtifacts: () => true, vraskaShield: (a, b) => b.me.shields > a.me.shields, noop: () => true, tamiyoWatch: () => true, protect: () => true, counter: () => true,
   extraCombat: () => true, cheatAttack: () => true, pacify: () => true, scry: () => true, homeward: () => true,
 };
 const CONDITIONAL = new Set(['sacLand', 'weld', 'sorinSac', 'junji', 'animateArtifact', 'balefire', 'lordOfVoid', 'ragavan', 'stealArtifacts', 'edictThat', 'millPower', 'winIfArtifacts', 'archfiend', 'ebonLegion', 'coffin', 'defenseOfHeart', 'squirrelKill', 'castVoid', 'gixExile', 'fateseal', 'untapLands', 'untapLandsN', 'untapCreature', 'extraLandNow', 'noop', 'protect', 'counter', 'extraCombat', 'cheatAttack', 'pacify']);
