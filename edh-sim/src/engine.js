@@ -3110,10 +3110,23 @@
     playerThreat(q) {
       return q.bf.reduce((s, c) => s + (c.info.isLand ? 0.5 : this.permValue(c)), 0) + (40 - q.life) * -0.15;
     }
+    // How close a player is to winning: their board, the network's win chance, a combo one piece away, unlimited mana, poison and commander damage dealt
+    threatOf(q) {
+      const key = q.seat + ':' + this._nnTick;
+      if (this._thr && this._thr.key === key) return this._thr.v;
+      let v = this.playerThreat(q) + q.hand.length * 1.5 + (q.infMana ? 50 : 0);
+      if (this.nn) v += 100 * this.nnV(q);
+      if (this.comboWants(q).some((w) => w.missing.length <= 1)) v += 25;
+      for (const r of this.players) if (r !== q) { v += r.poison * 3; for (const c of q.bf.concat(q.command)) if (c.isCommander) v += (r.cmdDmg[c.id] || 0) * 1.2; }
+      this._thr = { key, v };
+      return v;
+    }
+    // q's threat compared with p's other opponents (positive: q is the one to stop)
+    relThreat(p, q) { const opps = this.opps(p); if (opps.length < 2) return 0; const all = opps.map((o) => this.threatOf(o)); return this.threatOf(q) - all.reduce((a, b) => a + b, 0) / all.length; }
     bestOppTarget(p, pred) {
       let best = null, bestV = 2;
       for (const q of this.opps(p)) {
-        const lead = this.playerThreat(q) * 0.05;
+        const lead = this.politics ? this.relThreat(p, q) * 0.1 * (this.politics / 40) : this.playerThreat(q) * 0.05; // removal leans toward the leader's permanents
         for (const c of q.bf) if (pred(c)) { const v = this.permValue(c) + lead; if (v > bestV) { best = c; bestV = v; } }
       }
       return best;
@@ -4606,9 +4619,9 @@
         let through = 0;
         for (const a of attackers) if (!blockers.some((b) => this.canBlock(b, a))) through += this.power(a);
         const total = attackers.reduce((s, a) => s + this.power(a), 0);
-        let s = through * 2 + total * 0.5 - blockers.length * 1.5 + this.playerThreat(q) * 0.15 - q.life * 0.2 + this.R() * 3;
-        // table politics: hit the player most likely to win (the network's estimate), not just the one with the fewest blockers
-        if (this.politics && this.nn) s += this.politics * this.nnV(q);
+        // damage that gets through matters, but table politics matters more: hit the main threat, not just the open board
+        let s = Math.min(through, q.life) * 1.2 + total * 0.3 - blockers.length * 1.0 - q.life * 0.2 + this.R() * 2;
+        if (this.politics) s += (this.politics / 40) * 0.6 * this.relThreat(p, q);
         if (through >= q.life) s += 100;
         if (s > bestS) { bestS = s; best = q; }
       }
