@@ -1827,7 +1827,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       if (c.whipped) { c.whipped = false; c.zone = 'exile'; owner.exile.push(c); return; } // Whip of Erebos
       if (c.info.shuffleBack) { c.zone = 'library'; owner.library.push(c); this.R.shuffle(owner.library); return; }
       // Valgavoth: "If a card you didn't control would be put into an opponent's graveyard, exile it instead"
-      const voider = this.alive().find((q) => q !== owner && q.seat !== lastCtrl && this.has(q, 'voidExile'));
+      const voider = this.alive().find((q) => q !== owner && this.statics(q, 'voidExile').some(({ s: st }) => !st.valgavoth || q.seat !== lastCtrl)); // (Dauthi takes everything; Valgavoth only cards its controller didn't control)
       if (voider) { c.zone = 'exile'; c.voidBy = voider.seat; owner.exile.push(c); return; }
       if (!c.token && (owner.emblems || []).includes('tamiyo')) { c.zone = 'hand'; owner.hand.push(c); return; } // Tamiyo, the Moon Sage's emblem: it goes back to hand
       c.zone = 'gy'; owner.gy.push(c);
@@ -3408,7 +3408,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
         case 'millPower': {
           // target player: an opponent close to decking, otherwise ourselves when the graveyard is our engine
           const n = this._sacPower || 0; if (!n) break;
-          const q = this.opps(p).filter((o) => o.library.length <= n + 2).sort((a, b) => a.library.length - b.library.length)[0] || p;
+          const q = this.opps(p).filter((o) => o.library.length <= n + 2).sort((a, b) => a.library.length - b.library.length)[0] || (this.gyHated(p) ? this.opps(p)[0] : p) || p;
           const m = this.mill(q, n); this.emit('effect', `${name}: ${q.name} mills ${m.length}.`, { seat: p.seat, target: q.seat });
           break;
         }
@@ -4579,8 +4579,10 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     // Muldrotha loops: a creature whose death or entering does something (Kokusho, Sakura-Tribe Elder, Eternal Witness)
     // is sacrificed and cast again from the graveyard with the turn's creature slot. At the end of the turn a death
     // trigger is cashed in once more, since Muldrotha brings the creature back next turn.
+    // An opponent's Valgavoth or Dauthi Voidwalker exiles whatever would go to p's graveyard (and lets them play it): no filling the graveyard then
+    gyHated(p) { return this.opps(p).some((q) => this.has(q, 'voidExile')); }
     gravetide(p, endOfTurn) {
-      if (!this.has(p, 'muldrotha') || p.lost || this.over || this.locked(p) || this.active !== p.seat || (!endOfTurn && p.gyCastTypes.has('Creature'))) return;
+      if (!this.has(p, 'muldrotha') || p.lost || this.over || this.locked(p) || this.gyHated(p) || this.active !== p.seat || (!endOfTurn && p.gyCastTypes.has('Creature'))) return;
       const n = this.opps(p).length;
       const diesV = (c) => c.info.dies.reduce((a, f) => a + (f.k === 'drain' ? num(f.n) * n * 1.5 : f.k === 'junji' ? 8 : 0), 0);
       const etbV = (c) => c.info.etb.reduce((a, f) => a + (f.k === 'ramp' || f.k === 'draw' ? 6 : f.k === 'search' ? 5 : f.k === 'regrow' ? (p.gy.some((x) => !x.info.isLand && !x.info.isPermanent && x.info.spell.length) ? 8 : 0) : 0), 0);
@@ -4677,7 +4679,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
           case 'draw': case 'tokens': case 'treasure': case 'counters': case 'drain': case 'drainOne': case 'damage': case 'ramp': case 'proliferate': case 'tutor': case 'loot': return true;
           case 'gain': return p.life < 40 || p.bf.some((x) => x.info.triggers.some((t) => t.k === 'bond' || t.k === 'onGain'));
           case 'search': return f.dest !== 'gy' || p.gy.length < 20;
-          case 'mill': return this.has(p, 'muldrotha') || p.bf.some((x) => x.info.sidisi) || p.hand.some((x) => x.info.spell.some((y) => y.k === 'reanimate')) || f.n <= 2;
+          case 'mill': return !this.gyHated(p) && (this.has(p, 'muldrotha') || p.bf.some((x) => x.info.sidisi) || p.hand.some((x) => x.info.spell.some((y) => y.k === 'reanimate')) || f.n <= 2);
           case 'scry': return true;
           case 'discard': return this.opps(p).some((q) => q.hand.length > 0);
           case 'counter': return false;
@@ -4691,8 +4693,8 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
           case 'cheatCreature': return p.hand.some((x) => x.info.isCreature && x.info.mv >= 5);
           case 'castVoid': return this.players.some((q) => q.exile.some((x) => x.voidBy === p.seat && !x.info.isLand && x.info.mv >= 3));
           case 'gixExile': return p.hand.length >= 3;
-          case 'hermit': return this.has(p, 'labman') || p.library.length > 15 && p.library.filter((x) => x.info.isLand && x.info.types.has('Basic')).length >= 2 && (this.has(p, 'muldrotha') || this.has(p, 'labman') || p.hand.some((x) => x.info.spell.some((y) => y.k === 'reanimate' || y.k === 'massReanimate')) || p.bf.some((x) => x.info.sidisi));
-          case 'millPower': return postCombat && (this.has(p, 'muldrotha') || p.bf.some((x) => x.info.sidisi) || this.opps(p).some((q) => q.library.length <= 12));
+          case 'hermit': return this.has(p, 'labman') || !this.gyHated(p) && p.library.length > 15 && p.library.filter((x) => x.info.isLand && x.info.types.has('Basic')).length >= 2 && (this.has(p, 'muldrotha') || this.has(p, 'labman') || p.hand.some((x) => x.info.spell.some((y) => y.k === 'reanimate' || y.k === 'massReanimate')) || p.bf.some((x) => x.info.sidisi));
+          case 'millPower': return postCombat && (!this.gyHated(p) && this.has(p, 'muldrotha') || p.bf.some((x) => x.info.sidisi) || this.opps(p).some((q) => q.library.length <= 12));
           case 'revealUntil': return p.library.some((x) => x.info.types.has('Artifact') && x.info.mv >= 4);
           case 'noBlock': case 'tapBlocker': return !postCombat;
           case 'millTop': return postCombat && p.library[0] && !(p.library[0].info.types.has('Artifact') || p.library[0].info.colors.size === 0);
