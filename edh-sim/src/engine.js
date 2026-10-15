@@ -1253,7 +1253,12 @@
       if (c.info.isLand) { if (this._landBatch) this._landBatch.add(owner.seat); else for (const x of owner.bf) for (const t of x.info.triggers) if (t.k === 'landToGy') this.resolveEffects(owner, t.fx, x, null, false); }
     }
     discardCard(p, c) { this.removeFrom(p.hand, c); if (this.has(p, 'necro')) { c.zone = 'exile'; p.exile.push(c); return; } this.toGraveyard(c); }
-    discardWorst(p, n = 1) { for (let i = 0; i < n && p.hand.length; i++) { const d = p.hand.slice().sort((a, b) => this.cardValue(p, a) + this.nnAdv(p, a) * 40 - this.cardValue(p, b) - this.nnAdv(p, b) * 40)[0]; this.discardCard(p, d); } }
+    discardWorst(p, n = 1) {
+      // discarding several cards is one event: "one or more land cards" (The Gitrog Monster) triggers once
+      const batch = !this._landBatch; if (batch) this._landBatch = new Set();
+      for (let i = 0; i < n && p.hand.length; i++) { const d = p.hand.slice().sort((a, b) => this.cardValue(p, a) + this.nnAdv(p, a) * 40 - this.cardValue(p, b) - this.nnAdv(p, b) * 40)[0]; this.discardCard(p, d); }
+      if (batch) { const seats = this._landBatch; this._landBatch = null; for (const s2 of seats) { const q = this.P(s2); for (const x of q.bf) for (const t of x.info.triggers) if (t.k === 'landToGy') this.resolveEffects(q, t.fx, x, null, false); } }
+    }
     mill(p, n) {
       const out = [];
       // one event: "one or more land cards" (The Gitrog Monster) triggers once, not per land
@@ -2257,7 +2262,9 @@
         }
         case 'regrow': {
           const fewLands = p.bf.filter((x) => x.info.isLand).length < 5;
-          const val = (x) => (x.info.isLand ? (fewLands || x.info.cradle || x.info.coffers ? 6 : 0) : this.cardValue(p, x));
+          // with Muldrotha out, permanents can be cast from the graveyard anyway: take back an instant or sorcery
+          const mul = this.has(p, 'muldrotha');
+          const val = (x) => (x.info.isLand ? (fewLands || x.info.cradle || x.info.coffers ? 6 : 0) : mul && x.info.isPermanent ? this.cardValue(p, x) * 0.3 : this.cardValue(p, x) + (mul && x.info.spell.length ? 6 : 0));
           const c = p.gy.filter((x) => !x.info.isLand || val(x) > 0).sort((a, b) => val(b) - val(a))[0];
           if (c) { this.removeFrom(p.gy, c); c.zone = 'hand'; p.hand.push(c); this.emit('effect', `${p.name} returns ${c.info.name} to hand.`, { seat: p.seat, cards: [c.id] }); }
           break;
@@ -3190,6 +3197,8 @@
       if (i.isPW) s += 22 + i.loyalty;
       if (i.triggers.some((t) => t.k === 'bond' || t.k === 'exquisite')) s += 15;
       const fx = i.isPermanent ? i.etb : i.spell;
+      // targets as this card would see them (Serra's Emissary's protection from creatures stops Gilded Drake)
+      const tgtOk = (x) => { this._ctx.push(c); try { return this.targetable(x, p); } finally { this._ctx.pop(); } };
       for (const f of fx) {
         if (f.k === 'ramp') s += 28 - turnN * 2;
         if (f.k === 'draw') s += 6 + (f.n === 'X' ? 3 : f.n * 3) + (p.hand.length < 3 ? 8 : 0);
@@ -3199,12 +3208,12 @@
         if (f.k === 'treasure') s += 4;
         if (f.k === 'removal' || f.k === 'steal') {
           const pred = f.what === 'creature' ? (x) => x.info.isCreature : (x) => !x.info.isLand;
-          const t = this.bestOppTarget(p, (x) => pred(x) && this.targetable(x, p));
+          const t = this.bestOppTarget(p, (x) => pred(x) && tgtOk(x));
           if (!t && i.isInstant || !t && i.isSorcery) return -1;
           if (t) s += Math.min(25, this.permValue(t) * 1.6);
           if (t && this.permValue(t) < 6 && !i.isPermanent) s -= 15;
         }
-        if (f.k === 'exchange') { const t = this.bestOppTarget(p, (x) => x.info.isCreature && this.targetable(x, p) && (!f.pmax || this.power(x) <= f.pmax)); if (!t) return -1; s += this.creatureValue(t) * 1.5; }
+        if (f.k === 'exchange') { const t = this.bestOppTarget(p, (x) => x.info.isCreature && tgtOk(x) && (!f.pmax || this.power(x) <= f.pmax)); if (!t) return -1; s += this.creatureValue(t) * 1.5; }
         if (f.k === 'edict') { if (!opp.some((q) => q.bf.some((x) => x.info.isCreature))) return -1; s += 8; }
         if (f.k === 'wipe') {
           if (f.what === 'lands') { const myLands = p.bf.filter((x) => x.info.isLand).length; const theirs = Math.max(...opp.map((q) => q.bf.filter((x) => x.info.isLand).length)); if (myLands >= theirs || mine < oppMax) return -1; s += 15; continue; }
@@ -3708,7 +3717,7 @@
       if (p.necroPending && p.necroPending.length) { for (const c of p.necroPending) { c.zone = 'hand'; p.hand.push(c); } p.necroPending = []; }
       // cleanup
       const max = this.has(p, 'noMaxHand') || (p.emblems || []).includes('tamiyo') ? 99 : 7;
-      if (p.hand.length > max) this.discardWorst(p, p.hand.length - max);
+      for (let i = 0; i < 6 && p.hand.length > max; i++) this.discardWorst(p, p.hand.length - max); // (a discard can draw: The Gitrog Monster; cleanup repeats)
       for (const c of this.allBf()) {
         c.dmg = 0; c.dt = false; c.eot = { p: 0, t: 0, kw: [] }; c.indestructibleEOT = false; c.hexproofEOT = false; c.noBlock = false;
         if (c.animatedEOT) { c.animatedEOT = false; this.restoreInfo(c); }
@@ -3759,6 +3768,7 @@
       if (!second && p.drainMana) { this.addFloating(p, 'C', p.drainMana); this.emit('effect', `Mana Drain gives ${p.name} ${p.drainMana} extra mana.`, { seat: p.seat }); p.drainMana = 0; }
       this.playLand(p);
       this.myrkulDruid(p);
+      this.gravetide(p, false);
       let guard = 0;
       while (guard++ < 40 && !p.lost && !this.over) {
         // a combo that just came together (Druid cast with Myrkul out) makes the mana before the next spell
@@ -3788,7 +3798,36 @@
       this.pingers(p, second);
       this.useWalkers(p, second);
       this.equipStuff(p);
+      if (second) this.gravetide(p, true);
     }
+
+    // Muldrotha loops: a creature whose death or entering does something (Kokusho, Sakura-Tribe Elder, Eternal Witness)
+    // is sacrificed and cast again from the graveyard with the turn's creature slot. At the end of the turn a death
+    // trigger is cashed in once more, since Muldrotha brings the creature back next turn.
+    gravetide(p, endOfTurn) {
+      if (!this.has(p, 'muldrotha') || p.lost || this.over || this.locked(p) || this.active !== p.seat || (!endOfTurn && p.gyCastTypes.has('Creature'))) return;
+      const n = this.opps(p).length;
+      const diesV = (c) => c.info.dies.reduce((a, f) => a + (f.k === 'drain' ? num(f.n) * n * 1.5 : f.k === 'junji' ? 8 : 0), 0);
+      const etbV = (c) => c.info.etb.reduce((a, f) => a + (f.k === 'ramp' || f.k === 'draw' ? 6 : f.k === 'search' ? 5 : f.k === 'regrow' ? (p.gy.some((x) => !x.info.isLand && !x.info.isPermanent && x.info.spell.length) ? 8 : 0) : 0), 0);
+      const selfSac = (c) => this.selfSacAb(c);
+      const outlet = (c, cost) => this.sacOutlets(p).filter((o) => o !== c && !o.info.sacOutlet.tribes && !(o.info.sacOutlet.fx || []).some((f) => f.mvPlusOne) && !o.info.sacOutlet.mana)
+        .sort((a, b) => (b.info.sacOutlet.addsMana ? 1 : 0) - (a.info.sacOutlet.addsMana ? 1 : 0))[0];
+      const gyBest = Math.max(0, ...p.gy.filter((x) => x.info.isCreature && !x.info.isLand && ['Artifact', 'Enchantment'].every((t) => !x.info.types.has(t) || p.gyCastTypes.has(t))).map((x) => this.scoreCast(p, x, 'gy')));
+      const cands = p.bf.filter((c) => c.info.isCreature && !c.token && !c.isCommander && c.owner === p.seat && !c.info.copy && !c.p1 && !c.info.kw.has('persist') && !c.info.kw.has('undying'))
+        .map((c) => ({ c, ss: selfSac(c), v: diesV(c) + (endOfTurn ? 0 : etbV(c) + (selfSac(c) ? 6 : 0) - (this.canAttack(c) ? this.power(c) * 0.5 : 0)) }))
+        .filter((x) => (endOfTurn ? x.v >= 10 : x.v >= 5 && this.scoreCast(p, x.c, 'gy') >= gyBest && this.availableMana(p) + (x.ss ? 0 : 2) >= this.costFor(p, x.c, 'gy').mv) && (x.ss || outlet(x.c)))
+        .sort((a, b) => b.v - a.v);
+      for (const { c, ss } of endOfTurn ? cands : cands.slice(0, 1)) {
+        if (c.zone !== 'bf' || p.lost || this.over) continue;
+        if (ss) this.doActivate(p, { c, ab: ss, fodder: [], cost: ss.cost });
+        else { const o = outlet(c); if (!o || !this.sacrifice(p, c, o)) continue; this.emit('combo', `${p.name} sacrifices ${c.info.name} to ${o.info.name}${endOfTurn ? '; Muldrotha brings it back next turn' : ' to cast it again with Muldrotha'}.`, { seat: p.seat, cards: [c.id, o.id] }); }
+        this.checkState();
+        if (!endOfTurn && c.zone === 'gy' && this.pay(p, this.costFor(p, c, 'gy'))) this.castSpell(p, c, 'gy', 'Creature');
+      }
+    }
+
+    // Sakura-Tribe Elder style: sacrifice itself for free for something (blocks, then goes away before damage)
+    selfSacAb(c) { return c.info.isCreature && c.info.activated.find((ab) => ab.sac && !ab.tap && !ab.cost.mv && !ab.life && ab.fx.some((f) => f.k === 'ramp' || f.k === 'draw')); }
 
     animateManlands(p) {
       for (const c of p.bf) {
@@ -3876,7 +3915,7 @@
           case 'cheatCreature': return p.hand.some((x) => x.info.isCreature && x.info.mv >= 5);
           case 'castVoid': return this.players.some((q) => q.exile.some((x) => x.voidBy === p.seat && !x.info.isLand && x.info.mv >= 3));
           case 'gixExile': return p.hand.length >= 3;
-          case 'hermit': return this.has(p, 'muldrotha') || this.has(p, 'labman') || p.hand.some((x) => x.info.spell.some((y) => y.k === 'reanimate' || y.k === 'massReanimate')) || p.bf.some((x) => x.info.sidisi);
+          case 'hermit': return this.has(p, 'labman') || p.library.length > 15 && p.library.filter((x) => x.info.isLand && x.info.types.has('Basic')).length >= 2 && (this.has(p, 'muldrotha') || this.has(p, 'labman') || p.hand.some((x) => x.info.spell.some((y) => y.k === 'reanimate' || y.k === 'massReanimate')) || p.bf.some((x) => x.info.sidisi));
           case 'millPower': return postCombat && (this.has(p, 'muldrotha') || p.bf.some((x) => x.info.sidisi) || this.opps(p).some((q) => q.library.length <= 12));
           case 'revealUntil': return p.library.some((x) => x.info.types.has('Artifact') && x.info.mv >= 4);
           case 'noBlock': case 'tapBlocker': return !postCombat;
@@ -3900,12 +3939,12 @@
       // a tapped Wretch can pay a -1/-1 counter to untap and start
       const untapByCounter = ab.untapWithCounter && c.tapped && (!c.info.isCreature || myrkulOut || this.toughness(c) > 1);
       if (ab.tap && ((c.tapped && !untapByCounter) || (c.info.isCreature && c.sick && !this.hasKw(c, 'haste') && !elixir))) return null;
-      if (ab.tap && c.info.isCreature && !postCombat && !ab.preCombat && !loopNow && !this.hasKw(c, 'vigilance') && this.canAttack(c) && !ab.fx.some((f) => f.k === 'osgir')) return null; // creatures prefer to attack first
+      if (ab.tap && c.info.isCreature && !postCombat && !ab.preCombat && !loopNow && !this.hasKw(c, 'vigilance') && this.canAttack(c) && !ab.fx.some((f) => f.k === 'osgir' || f.k === 'hermit')) return null; // creatures prefer to attack first
       if (ab.sorcery && postCombat === undefined) return null;
       if (ab.life && (p.life - ab.life < 10 || !this.canPayLife(p, ab.life))) return null;
       if (ab.sacOther && !ab.sacArtifact && !ab.sacCreature && !ab.sacArtifactN) return null;
       if (ab.discard && p.hand.length < ab.discard + 1) return null;
-      if ((ab.sacCreature || ab.discard) && !ab.fx.some((f) => ['draw', 'tutor', 'damage', 'removal', 'search', 'drain', 'tokens', 'proliferate'].includes(f.k))) return null;
+      if ((ab.sacCreature || ab.discard) && !ab.fx.some((f) => ['draw', 'tutor', 'damage', 'removal', 'search', 'drain', 'tokens', 'proliferate', 'millPower'].includes(f.k))) return null;
       if (!this.abilityUseful(p, ab, c, postCombat)) return null;
       let fodder = [];
       if (ab.sacArtifact) {
@@ -4431,7 +4470,9 @@
       // Spore Frog style fogs when the hit would be big
       const incoming = attackers.filter((a) => a.zone === 'bf' && !blocks.has(a.id)).reduce((s2, a) => s2 + this.power(a), 0);
       const frog = q.bf.find((c) => c.info.fogSac);
-      if (frog && !this.abolished(q, 'ability') && (incoming >= q.life || incoming >= 10)) { this.destroy(frog, 'sacrificed', true); this.fogTurn = this.turn; this.emit('response', `${q.name} sacrifices ${frog.info.name}: all combat damage this turn is prevented.`, { seat: q.seat, cards: [frog.id] }); }
+      // a blocking Sakura-Tribe Elder that would die anyway is sacrificed for its value before damage
+      if (!this.abolished(q, 'ability')) for (const [aid, bs] of blocks) for (const b of bs) { const ab = this.selfSacAb(b); if (ab && b.zone === 'bf' && this.power(this.cards[aid]) >= this.toughness(b)) this.doActivate(q, { c: b, ab, fodder: [], cost: ab.cost }); }
+      if (frog && !this.abolished(q, 'ability') && (incoming >= q.life || incoming >= (this.has(q, 'muldrotha') ? 4 : 10))) { this.destroy(frog, 'sacrificed', true); this.fogTurn = this.turn; this.emit('response', `${q.name} sacrifices ${frog.info.name}: all combat damage this turn is prevented.`, { seat: q.seat, cards: [frog.id] }); }
       // Osgir: sacrifice artifacts for +2/+0 on an unblocked attacker when it gets there
       const osg = p.bf.find((c) => c.info.osgirPump);
       if (osg) {
@@ -4571,6 +4612,8 @@
         if (!choice) choice = able.find((b) => { const [, bt] = this.pt(b); return (bt > ap || this.hasKw(b, 'indestructible')) && !ak.has('deathtouch') && !ak.has('trample'); });
         // trade
         if (!choice) choice = able.filter((b) => { const [bp] = this.pt(b); return (bp >= at || this.hasKw(b, 'deathtouch')) && strikesBack(b) && !ak.has('indestructible') && this.creatureValue(b) <= this.creatureValue(a) + 1; }).sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0];
+        // a creature that sacrifices itself for value (Sakura-Tribe Elder) blocks for free
+        if (!choice && !ak.has('trample')) choice = able.find((b) => !b.isCommander && this.selfSacAb(b) && this.pt(b)[1] <= ap);
         // chump when in danger
         const cmdLethal = a.isCommander && (q.cmdDmg[a.id] || 0) + ap >= 21;
         if (!choice && (remaining >= q.life || cmdLethal || (remaining >= q.life * 0.6 && ap >= 6))) {
