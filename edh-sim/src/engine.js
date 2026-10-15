@@ -867,6 +867,34 @@
       this.winner = null;
       this.over = false;
       this.focus = [];
+      this.stats = {};      // card id -> what that card has done this game
+      this.casts = [];      // every spell cast: { seat, name, turn }
+      this._ctx = [];       // stack of cards whose effects are resolving (for credit)
+      this._crBuf = [];
+      this.learned = opts.learned || null;          // learned card priorities per deck
+      this.learnSeats = opts.learnSeats || null;    // which seats use them (default: all)
+    }
+
+    // ----- statistics: credit each result to the card that caused it -----
+    creditTarget(c) { return c && c.creditTo && this.cards[c.creditTo] ? this.cards[c.creditTo] : c; }
+    credit(c, stat, n) {
+      if (!c || !n || !c.id) return;
+      const t = this.creditTarget(c);
+      const st = this.stats[t.id] || (this.stats[t.id] = { name: t.token ? t.info.name : t.name, seat: t.owner, token: !!t.token });
+      st[stat] = (st[stat] || 0) + n;
+      if (this.record) this._crBuf.push([t.id, stat, n]);
+    }
+    // Learned priority for a card in this player's deck (-1..1), from train.mjs; 0 if unknown or not learning
+    learnedPri(p, name) {
+      if (!this.learned || (this.learnSeats && !this.learnSeats.includes(p.seat))) return 0;
+      const c = this.learned[p.deckId] && this.learned[p.deckId].cards[name];
+      if (!c || c.n < 8) return 0;
+      return c.pri * Math.min(1, c.n / 40);
+    }
+    ctxSrc() { return this._ctx[this._ctx.length - 1] || null; }
+    // A rough single number for "how much did this card do": damage, cards, board, interaction, mana
+    static cardValue(st) {
+      return (st.dmg || 0) + (st.cards || 0) * 2.5 + (st.tokens || 0) * 1.2 + (st.removed || 0) * 4 + (st.life || 0) * 0.3 + (st.mana || 0) * 0.6 + (st.countered || 0) * 4 + (st.tutored || 0) * 3;
     }
 
     makePlayer(deck, seat) {
@@ -990,6 +1018,7 @@
       if (!this.record) return;
       const ev = { kind, text, seat: extra.seat ?? null, cards: extra.cards || [], turn: this.round, active: this.active, phase: this.phase || '' };
       if (this.pendingMana && ['cast', 'ability', 'counter', 'response', 'combo'].includes(kind)) { ev.mana = this.pendingMana; this.pendingMana = null; }
+      if (this._crBuf.length) { ev.cr = this._crBuf; this._crBuf = []; }
       ev.snap = this.snapshot(extra);
       this.events.push(ev);
     }
@@ -1035,6 +1064,7 @@
           this.lose(p, 'tried to draw from an empty library'); return;
         }
         const c = p.library.shift(); c.zone = 'hand'; p.hand.push(c); p.cardsDrawn++;
+        { const sc = this.ctxSrc(); if (this.started && sc && sc.ctrl === p.seat) this.credit(sc, 'cards', 1); }
         if (p.drawsTurn !== this.turn) { p.drawsTurn = this.turn; p.drawsThis = 0; }
         p.drawsThis++;
         if (this.started) this.onDraw(p);
@@ -1074,7 +1104,7 @@
       if (c.info.isLand) for (const x of owner.bf) for (const t of x.info.triggers) if (t.k === 'landToGy') this.resolveEffects(owner, t.fx, x, null, false);
     }
     discardCard(p, c) { this.removeFrom(p.hand, c); this.toGraveyard(c); }
-    discardWorst(p, n = 1) { for (let i = 0; i < n && p.hand.length; i++) { const d = p.hand.slice().sort((a, b) => this.cardValue(p, a) - this.cardValue(p, b))[0]; this.discardCard(p, d); } }
+    discardWorst(p, n = 1) { for (let i = 0; i < n && p.hand.length; i++) { const d = p.hand.slice().sort((a, b) => this.cardValue(p, a) + this.learnedPri(p, a.name) * 6 - this.cardValue(p, b) - this.learnedPri(p, b.name) * 6)[0]; this.discardCard(p, d); } }
     mill(p, n) { const out = []; for (let i = 0; i < n && p.library.length; i++) { const c = p.library.shift(); this.toGraveyard(c); out.push(c); } return out; }
     tryDredge(p) {
       const loam = p.gy.find((c) => c.info.dredge && p.library.length > c.info.dredge + 5);
@@ -1211,6 +1241,7 @@
       const act = this.P(this.active);
       if (act !== p && this.has(act, 'bloodletter')) n *= 2 ** this.statics(act, 'bloodletter').length;
       p.life -= n;
+      { const sc = source || this.ctxSrc(); if (sc && sc.ctrl !== p.seat) this.credit(sc, 'dmg', n); }
       if (p.lostTurn !== this.turn) { p.lostTurn = this.turn; p.lostThis = 0; }
       p.lostThis += n;
       for (const c of p.bf) for (const t of c.info.triggers) if (t.k === 'vilis' && (this._vilisDepth || 0) < 2) { this._vilisDepth = (this._vilisDepth || 0) + 1; const vn = Math.min(n, Math.max(0, p.library.length - 3), 10); this.draw(p, vn); if (vn) this.emit('draw', `Vilis: ${p.name} draws ${vn}.`, { seat: p.seat, cards: [c.id] }); this._vilisDepth--; }
@@ -1223,6 +1254,7 @@
       if (n <= 0 || p.lost) return;
       if (p.protectedUntil >= this.turn) return;
       if (this.opps(p).some((q) => this.has(q, 'noOppGain'))) return;
+      { const sc = source || this.ctxSrc(); if (sc && sc.ctrl === p.seat) this.credit(sc, 'life', n); }
       p.life += n;
       const trig = p.bf.flatMap((c) => c.info.triggers.map((t) => ({ t, c })));
       const bonds = this.bondTriggers(p);
@@ -1584,6 +1616,7 @@
         for (const [k, v] of Object.entries(pool)) if (v > 0) p.floating[k] = v;
         this.pendingMana = spent.length || Object.keys(p.floating).length ? { seat: p.seat, spent, sources: used.map(({ s }) => s.c.id) } : null;
         for (const { s, o } of used) {
+          this.credit(s.c, 'mana', o.amount);
           if (s.counters) { s.c.p1 = 0; continue; }
           if (s.fodder) { if (s.fodder.zone === 'bf') this.destroy(s.fodder, 'sacrificed', true); if (s.tapSrc) s.c.tapped = true; continue; }
           s.c.tapped = true;
@@ -1755,7 +1788,9 @@
       const cap = Math.max(0, 80 - p.bf.filter((c) => c.token).length);
       for (let i = 0; i < Math.min(n, cap); i++) {
         const t = this.makeToken(p, spec); t.ctrl = p.seat; p.bf.push(t); made.push(t.id);
+        const sc = this.ctxSrc(); if (sc) t.creditTo = this.creditTarget(sc).id;
       }
+      if (made.length) this.credit(this.ctxSrc(), 'tokens', made.length);
       if (this.has(p, 'chatterfang') && !spec.squirrel) for (let i = 0; i < Math.min(n, cap - made.length); i++) { const t = this.makeToken(p, { p: 1, t: 1, sub: 'Squirrel', colors: 'green', squirrel: true }); p.bf.push(t); made.push(t.id); }
       if (!spec.treasure && !spec.artifactToken) for (const id of made) this.creatureEntered(p, this.cards[id]);
       if (!quiet || made.length > 1) this.emit('token', `${p.name} creates ${n} ${spec.treasure ? 'Treasure' : spec.artifactToken ? spec.artifactToken : spec.p + '/' + spec.t + ' ' + spec.sub} token${n > 1 ? 's' : ''}.`, { seat: p.seat, cards: made });
@@ -1763,6 +1798,10 @@
     }
 
     resolveEffect(p, fx, src, xVal = 0, quiet = false) {
+      if (src) this._ctx.push(src);
+      try { return this._resolveEffect(p, fx, src, xVal, quiet); } finally { if (src) this._ctx.pop(); }
+    }
+    _resolveEffect(p, fx, src, xVal = 0, quiet = false) {
       const name = src ? src.info.name : '';
       if (fx.sevenNames && new Set(p.bf.filter((c) => c.info.isLand).map((c) => c.name)).size < 7) return;
       if (fx.ifColor && !(this._entering && this._entering.info.colors && this._entering.info.colors.has(fx.ifColor))) return;
@@ -1870,6 +1909,7 @@
           else if (fx.shrink) { tgt.eot.t -= fx.shrink; tgt.eot.p -= fx.shrink; verb = 'shrinks'; this.checkState(); }
           else if (fx.exile) { this.exileCard(tgt); verb = 'exiles'; }
           else { const tough = this.toughness(tgt); if (!this.destroy(tgt)) { this.emit('removal', `${tgt.info.name} survives (indestructible).`, { seat: p.seat, cards: [tgt.id] }); break; } verb = 'destroys'; if (fx.gainToughness) this.gainLife(p, tough); }
+          if (owner !== p) this.credit(src, 'removed', 1);
           this.emit('removal', `${name || p.name} ${verb} ${owner.name}'s ${tgt.info.name}.`, { seat: p.seat, cards: [tgt.id], target: owner.seat });
           break;
         }
@@ -1916,7 +1956,7 @@
         case 'tutor': {
           this.searched(p);
           const pick = this.chooseTutor(p, fx.what);
-          if (pick) { this.removeFrom(p.library, pick); pick.zone = 'hand'; p.hand.push(pick); this.R.shuffle(p.library); this.emit('tutor', `${p.name} tutors for ${pick.info.name}.`, { seat: p.seat, cards: [pick.id] }); }
+          if (pick) { this.credit(src, 'tutored', 1); this.removeFrom(p.library, pick); pick.zone = 'hand'; p.hand.push(pick); this.R.shuffle(p.library); this.emit('tutor', `${p.name} tutors for ${pick.info.name}.`, { seat: p.seat, cards: [pick.id] }); }
           break;
         }
         case 'tutorBF': {
@@ -2420,6 +2460,7 @@
       if (fx.what === 'farewell' && fx.modes.graveyards) { for (const q of this.alive()) { for (const c of q.gy) { c.zone = 'exile'; q.exile.push(c); } q.gy = []; } }
       if (fx.what === 'mv2' && fx.addMana) p.pool = (p.pool || 0) + victims.length;
       if (fx.what === 'minusX' || fx.what === 'damage' || fx.what === 'deluge' || fx.what === 'tribalMinus') { const before = this.allBf().length; this.checkState(); const after = this.allBf().length; this.emit('wipe', `${name} sweeps the board (${before - after} permanents die).`, { seat: p.seat, cards: src ? [src.id] : [] }); return; }
+      this.credit(src, 'removed', victims.filter((c) => c.owner !== p.seat).length - victims.filter((c) => c.owner === p.seat).length * 0.5);
       this.emit('wipe', `${name || 'A wipe'} ${fx.exile ? 'exiles' : 'destroys'} ${victims.length} permanent${victims.length === 1 ? '' : 's'}!`, { seat: p.seat, cards: src ? [src.id] : [] });
     }
 
@@ -2567,8 +2608,9 @@
       const opp = this.opps(p).map((q) => this.playerThreat(q)).sort((a, b) => b - a)[0] || 0;
       const mine = this.playerThreat(p);
       return pool.slice().sort((a, b) => {
-        const sa = this.cardValue(p, a) - Math.max(0, a.info.mv - avail) * 3 + (opp > mine + 15 && a.info.spell.some((f) => f.k === 'wipe') ? 20 : 0);
-        const sb = this.cardValue(p, b) - Math.max(0, b.info.mv - avail) * 3 + (opp > mine + 15 && b.info.spell.some((f) => f.k === 'wipe') ? 20 : 0);
+        const la = this.learnedPri(p, a.name) * 12, lb = this.learnedPri(p, b.name) * 12;
+        const sa = la + this.cardValue(p, a) - Math.max(0, a.info.mv - avail) * 3 + (opp > mine + 15 && a.info.spell.some((f) => f.k === 'wipe') ? 20 : 0);
+        const sb = lb + this.cardValue(p, b) - Math.max(0, b.info.mv - avail) * 3 + (opp > mine + 15 && b.info.spell.some((f) => f.k === 'wipe') ? 20 : 0);
         return sb - sa;
       })[0];
     }
@@ -2740,6 +2782,7 @@
       if (from === 'prepared') s = 30;
       if (!this.payAdditional(p, c, false)) return -1;
       if (!i.isPermanent && fx.length === 0) s = 1; // unmodeled spell: cast it last
+      s += this.learnedPri(p, c.name) * 14;
       if (this.completesCombo(p, c)) s += 60;
       else if (this.comboWants(p).some((w) => w.missing.some((m) => m.name === c.name))) s += 15;
       if (i.reanimAura && !this.alive().some((q) => q.gy.some((x) => x.info.isCreature && !x.isCommander))) return -1;
@@ -2781,6 +2824,8 @@
       else if (from === 'dash') { this.removeFrom(p.hand, c); }
       else if (from === 'flashback') { this.removeFrom(p.gy, c); c.flashedBack = true; }
       c.zone = 'stack';
+      this.casts.push({ seat: p.seat, name: c.name, turn: this.round, id: c.id });
+      { const st = this.stats[c.id] || (this.stats[c.id] = { name: c.name, seat: c.owner }); if (st.cast == null) st.cast = this.round; }
       p.spellsThisTurn = (p.spellsThisTurn || 0) + 1;
       if (!i.types.has('Artifact')) p.nonArtifactSpells = (p.nonArtifactSpells || 0) + 1;
       const fromTxt = { flashback: ' with flashback', command: ' from the command zone', gy: ' from the graveyard', citadel: ' off the top with Bolas\'s Citadel', top: ' off the top with Mystic Forge', valgavoth: ' from Valgavoth\'s exile', dash: ' for its dash cost' }[from] || '';
@@ -2881,6 +2926,7 @@
           if (this.R() > Math.min(0.95, 0.35 + (value + combo) * 0.06)) continue;
           if (ab.cost.mv) this.pay(q, ab.cost, 0, true);
           if (ab.sac) this.destroy(perm, 'sacrificed', true);
+          this.credit(perm, 'countered', 1);
           this.emit('counter', `${q.name} counters ${i.name} with ${perm.info.name}!`, { seat: q.seat, cards: [perm.id, c.id], target: p.seat });
           return true;
         }
@@ -2903,6 +2949,7 @@
             if (/exile a blue card/i.test(cs.info.text)) { const b = q.hand.find((x) => x !== cs && x.info.colors.has('U')); this.removeFrom(q.hand, b); b.zone = 'exile'; q.exile.push(b); this.loseLife(q, 1); }
           } else this.pay(q, cs.info.cost, 0, true);
           this.removeFrom(q.hand, cs); cs.zone = 'gy'; q.gy.push(cs);
+          this.credit(cs, 'countered', 1);
           this.emit('counter', `${q.name} counters ${i.name} with ${cs.info.name}!`, { seat: q.seat, cards: [cs.id, c.id], target: p.seat });
           if (/mana drain/i.test(cs.info.name)) q.drainMana = (q.drainMana || 0) + (i.mv || 0);
           if (/its controller creates a 2\/2 blue bird/i.test(cs.info.text)) this.addToken(p, { p: 2, t: 2, sub: 'Bird', kw: ['flying'], colors: 'blue' }, 1, true);
@@ -2992,6 +3039,8 @@
       score += Math.min(combo.length, 2) * 3; if (combo.length) why.push('combo piece');
       score += Math.min(tribal, 3) * 1.5; if (tribal >= 2) why.push(`${tribal} ${plan.tribe}s`);
       if (L + R >= Math.min(plan.cmdMv, 5) - 1) { score += 3; }
+      const learnedGood = spells.map((c) => this.learnedPri(p, c.name)).filter((x) => x > 0.15);
+      if (learnedGood.length) { score += Math.min(6, learnedGood.reduce((a, b) => a + b, 0) * 6); why.push(`${learnedGood.length} proven card${learnedGood.length > 1 ? 's' : ''}`); }
       if (spells.every((c) => c.info.mv >= 5) && spells.length) { score -= 6; why.push('all expensive'); }
       return { score, why };
     }
@@ -3000,7 +3049,7 @@
       for (let i = 0; i < n; i++) {
         const lands = p.hand.filter((c) => c.info.isLand).length;
         const pool = p.hand.slice().sort((a, b) => {
-          const v = (c) => (c.info.isLand ? (lands > 4 ? 0 : 20) : 10 + this.cardValue(p, c) - Math.max(0, c.info.mv - 4) * 2 + (this.handPlan(p).combo.has(c.name) ? 8 : 0));
+          const v = (c) => (c.info.isLand ? (lands > 4 ? 0 : 20) : 10 + this.learnedPri(p, c.name) * 8 + this.cardValue(p, c) - Math.max(0, c.info.mv - 4) * 2 + (this.handPlan(p).combo.has(c.name) ? 8 : 0));
           return v(a) - v(b);
         });
         const worst = pool[0];
