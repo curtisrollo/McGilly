@@ -1321,10 +1321,24 @@
 
     removeFrom(arr, c) { const i = arr.indexOf(c); if (i >= 0) arr.splice(i, 1); }
 
+    // Creatures that die at the same time (a wipe, -X/-X, combat damage) still see each other die: "whenever
+    // a creature dies" abilities look back in time. Remember the watchers that were on the battlefield when
+    // the batch started, so Myrkul or Blood Artist dying alongside the others still triggers for them.
+    beginDeathBatch() {
+      if (this._batch) return false;
+      this._batch = new Map();
+      for (const q of this.players) this._batch.set(q.seat, q.bf.filter((c) => c.info.deathWatch.length || c.info.triggers.some((t) => t.k === 'myrkul')));
+      return true;
+    }
+    endDeathBatch(started) { if (started) this._batch = null; }
+    watchers(pl, dead) {
+      const extra = this._batch ? (this._batch.get(pl.seat) || []).filter((x) => x !== dead && x.zone !== 'bf') : [];
+      return extra.length ? pl.bf.filter((x) => x !== dead).concat(extra) : pl.bf.filter((x) => x !== dead);
+    }
     onDeath(c, ctrl, exiled = false) {
       this.deathsThisTurn = (this.deathsThisTurn || 0) + 1;
       for (const src of ctrl.bf) if (src.info.equipDies && src.attachedWas === c.id) this.resolveEffects(ctrl, src.info.equipDies, src, null, true);
-      if (!c.token && !c.isCommander && c.zone === 'gy' && ctrl.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'))) {
+      if (!c.token && !c.isCommander && c.zone === 'gy' && this.watchers(ctrl, c).some((m) => m.info.triggers.some((t) => t.k === 'myrkul'))) {
         this.removeFrom(this.P(c.owner).gy, c); c.zone = 'exile'; this.P(c.owner).exile.push(c);
         const info = Object.assign(Object.create(Object.getPrototypeOf(c.info)), c.info, { isCreature: false, types: new Set(['Enchantment']), name: c.info.name, power: undefined, toughness: undefined });
         const t = { id: this.nextId++, name: c.info.name, info, owner: ctrl.seat, ctrl: ctrl.seat, isCommander: false, token: true, tapped: false, sick: false, p1: 0, loyalty: 0, dmg: 0, dt: false, attached: null, eot: { p: 0, t: 0, kw: [] }, zone: 'bf', ench: true };
@@ -1336,7 +1350,7 @@
       }
       // own dies triggers
       if (c.info.dies.length) this.resolveEffects(ctrl, c.info.dies, c, `${c.info.name} dies`);
-      for (const pl of this.alive()) for (const src of [...pl.bf]) {
+      for (const pl of this.alive()) for (const src of this.watchers(pl, c)) {
         for (const w of src.info.deathWatch) {
           if (w.scope === 'mine' && pl !== ctrl) continue;
           if (w.scope === 'opp' && pl === ctrl) continue;
@@ -2077,8 +2091,8 @@
           for (const q of this.opps(p)) {
             if (this.has(q, 'sigarda')) continue;
             const cs = q.bf.filter((x) => x.info.isCreature).sort((a, b) => this.creatureValue(a) - this.creatureValue(b)).slice(0, fx.n || 1);
+            if (cs.length) this.emit('removal', `${name ? name + ': ' : ''}${q.name} sacrifices ${cs.map((c) => this.cname(c)).join(', ')}.`, { seat: p.seat, cards: cs.map((c) => c.id), target: q.seat });
             for (const c of cs) this.destroy(c, 'sacrificed', true);
-            if (cs.length) this.emit('removal', `${q.name} sacrifices ${cs.map((c) => c.info.name).join(', ')}.`, { seat: p.seat, cards: cs.map((c) => c.id), target: q.seat });
           }
           break;
         }
@@ -2094,7 +2108,7 @@
           const q = this._thatPlayer; if (!q) break;
           if (q !== p && this.has(q, 'sigarda')) { this.emit('effect', `${name}: Sigarda keeps ${q.name} from sacrificing.`, { seat: q.seat }); break; }
           const c = q.bf.filter((x) => x.info.isCreature).sort((a, b) => this.creatureValue(a) - this.creatureValue(b))[0];
-          if (c) { this.destroy(c, 'sacrificed', true); this.emit('removal', `${name}: ${q.name} sacrifices ${c.info.name}.`, { seat: p.seat, cards: [c.id], target: q.seat }); }
+          if (c) { this.emit('removal', `${name}: ${q.name} sacrifices ${this.cname(c)}.`, { seat: p.seat, cards: [c.id], target: q.seat }); this.destroy(c, 'sacrificed', true); }
           break;
         }
         case 'genesis': {
@@ -2282,9 +2296,9 @@
             const victims = pool.slice(0, fx.n);
             if (!victims.length) { parts.push(`${q.name} has nothing to sacrifice`); continue; }
             parts.push(`${q.name} sacrifices ${victims.map((c) => this.cname(c)).join(' and ')}`); hit.push(...victims);
-            for (const c of victims) this.destroy(c, 'sacrificed', true);
           }
           this.emit('removal', `${name}: ${parts.join('; ')}.`, { seat: p.seat, cards: (src ? [src.id] : []).concat(hit.map((c) => c.id)) });
+          { const b = this.beginDeathBatch(); for (const c of hit) this.destroy(c, 'sacrificed', true); this.endDeathBatch(b); }
           break;
         }
         case 'discardAll': for (const q of this.alive()) this.discardWorst(q, 1); if (!quiet) this.emit('effect', `${name}: each player discards a card.`, { seat: p.seat }); break;
@@ -2508,8 +2522,8 @@
           const pileA = [], pileB = []; let va = 0, vb = 0;
           for (const c of perms) { if (va <= vb) { pileA.push(c); va += this.permValue(c); } else { pileB.push(c); vb += this.permValue(c); } }
           const sac = va < vb ? pileA : pileB;
-          for (const c of sac) this.destroy(c, 'sacrificed', true);
-          this.emit('removal', `${name}: ${q.name} splits into piles and sacrifices ${sac.length} permanents.`, { seat: p.seat, target: q.seat });
+          this.emit('removal', `${name}: ${q.name} splits their permanents into piles and sacrifices ${this.listNames(sac.map((c) => this.cname(c)), 8)}.`, { seat: p.seat, target: q.seat, cards: sac.map((c) => c.id) });
+          { const b = this.beginDeathBatch(); for (const c of sac) this.destroy(c, 'sacrificed', true); this.endDeathBatch(b); }
           break;
         }
         case 'liliana9': {
@@ -2654,11 +2668,13 @@
         const desc = by.map(([q, l]) => `${q.name}'s ${this.listNames(l.map((c) => this.cname(c)), 5)}`).join('; ');
         this.emit('wipe', `${name || 'A wipe'} ${fx.exile ? 'exiles' : 'destroys'} ${hits.length - surv.length} permanent${hits.length - surv.length === 1 ? '' : 's'}: ${desc || 'nothing'}${surv.length ? ` (${this.listNames(surv.map((c) => c.info.name))} survive${surv.length === 1 ? 's' : ''})` : ''}.`, { seat: p.seat, cards: (src ? [src.id] : []).concat(hits.map((c) => c.id)) });
       }
+      const batch = this.beginDeathBatch();
       for (const c of hits) {
         if (c.zone !== 'bf') continue;
         if (fx.exile) { this.exileCard(c); victims.push(c); }
         else if (this.destroy(c)) victims.push(c);
       }
+      this.endDeathBatch(batch);
       if (fx.what === 'farewell' && fx.modes.graveyards) { for (const q of this.alive()) { for (const c of q.gy) { c.zone = 'exile'; q.exile.push(c); } q.gy = []; } }
       if (fx.what === 'mv2' && fx.addMana) p.pool = (p.pool || 0) + victims.length;
       if (fx.what === 'minusX' || fx.what === 'damage' || fx.what === 'deluge' || fx.what === 'tribalMinus') { const doomed = this.allBf().filter((c) => c.info.isCreature && (this.toughness(c) <= 0 || (c.dmg >= this.toughness(c) && !this.hasKw(c, 'indestructible') && !c.indestructibleEOT))); this.emit('wipe', `${name} sweeps the board${fx.what === 'damage' ? ` (${fx.n} damage to each creature)` : xVal ? ` (-${xVal}/-${xVal})` : ''}: ${doomed.length ? this.listNames(doomed.map((c) => this.cname(c)), 8) + ' die' + (doomed.length === 1 ? 's' : '') : 'nothing dies'}.`, { seat: p.seat, cards: (src ? [src.id] : []).concat(doomed.map((c) => c.id)) }); this.checkState(); return; }
@@ -2870,6 +2886,17 @@
           if (q.poison >= 10) { this.lose(q, '10 poison counters'); changed = true; continue; }
           for (const [k, v] of Object.entries(q.cmdDmg)) if (v >= 21) { this.lose(q, `21 commander damage from ${this.cards[k].info.name}`); changed = true; break; }
         }
+        const batch = this.beginDeathBatch();
+        // decide who dies first, then remove them all: they die at the same time
+        const dying = [];
+        for (const c of this.allBf()) {
+          if (!c.info.isCreature) continue;
+          const t = this.toughness(c);
+          if (t <= 0) dying.push([c, true]);
+          else if ((c.dmg >= t || (c.dt && c.dmg > 0)) && !this.hasKw(c, 'indestructible')) dying.push([c, false]);
+        }
+        for (const [c, force] of dying) if (c.zone === 'bf') { if (force) this.destroy(c, 'dies', true); else this.destroy(c); changed = true; }
+        this.endDeathBatch(batch);
         for (const c of this.allBf()) {
           if (c.info.isCreature) {
             const t = this.toughness(c);

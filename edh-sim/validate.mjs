@@ -385,6 +385,27 @@ scen('paying life', 'no life payment that walks into lethal: Vampiric Tutor, Rea
   me.life = 60; const fine = g.canPayLife(me, 2);
   return { ok: okVT && okRe && lethal && fine, note: `VT held ${okVT}, Reanimate held ${okRe}, never lethal ${lethal}, pays when safe ${fine}` };
 });
+scen('Myrkul, Lord of Bones', 'at 20 life or less Myrkul survives a destroy wipe and the others come back as enchantments', () => {
+  const g = table(); const [me] = g.players; me.life = 12;
+  const m = put(g, me, 'Myrkul, Lord of Bones'); m.isCommander = true; put(g, me, 'Palisade Giant'); put(g, me, 'Eternal Witness');
+  g.doWipe(g.players[1], { k: 'wipe', what: 'creatures' }, null, 0);
+  const copies = me.bf.filter((c) => c.ench).map((c) => c.name);
+  return { ok: m.zone === 'bf' && copies.includes('Palisade Giant') && copies.includes('Eternal Witness'), note: `Myrkul ${m.zone}, copies: ${copies.join(', ') || 'none'}` };
+});
+scen('Myrkul, Lord of Bones', 'creatures dying at the same time as Myrkul (-X/-X) still become enchantments', () => {
+  const g = table(); const [me, opp] = g.players; me.life = 30;
+  put(g, me, 'Myrkul, Lord of Bones'); put(g, me, 'Palisade Giant');
+  g.doWipe(opp, { k: 'wipe', what: 'minusX' }, null, 9);
+  const copies = me.bf.filter((c) => c.ench).map((c) => c.name);
+  return { ok: copies.includes('Palisade Giant'), note: `copies: ${copies.join(', ') || 'none'}` };
+});
+scen('Platinum Angel', 'as a Myrkul enchantment copy it still keeps its controller in the game below 0 life', () => {
+  const g = table(); const [me] = g.players;
+  put(g, me, 'Myrkul, Lord of Bones'); const pa = put(g, me, 'Platinum Angel');
+  g.destroy(pa, 'destroyed', true);
+  me.life = -5; g.checkState();
+  return { ok: !me.lost && me.bf.some((c) => c.ench && c.name === 'Platinum Angel'), note: me.lost ? 'lost the game' : '' };
+});
 scen('combat', 'a big creature does not attack into an untapped deathtouch blocker', () => {
   const g = table(); const [me, opp] = g.players; const big = put(g, me, 'Craterhoof Behemoth');
   for (const q of g.players.slice(1)) put(g, q, 'Vampire Nighthawk');
