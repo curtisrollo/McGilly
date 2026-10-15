@@ -28,6 +28,8 @@
     return `<svg class="art" viewBox="0 0 512 512" aria-hidden="true" style="color:${artColor(m.colors)}">${body}</svg>`;
   }
   const { Game } = window.PodSim;
+  // the trained neural network (data/nn.json), if this build has one
+  const NN = window.POD_DATA.nn ? Game.loadNN(window.POD_DATA.nn) : null;
   const $ = (s, el = document) => el.querySelector(s);
   const MANA = { W: 'var(--mW)', U: 'var(--mU)', B: 'var(--mB)', R: 'var(--mR)', G: 'var(--mG)', C: 'var(--mC)' };
   // 2× here is the old 0.5× pace; everything is four times slower than the first version
@@ -103,7 +105,7 @@
       if (z) { state.zoneView = { zone: z.dataset.zone, seat: +z.dataset.seat }; renderZone(); }
       if (e.target.id === 'closeZone' || e.target.id === 'zoneView') { state.zoneView = null; renderZone(); }
     });
-    $('#openMore').addEventListener('click', () => { $('#more').hidden = false; renderChecks(); });
+    $('#openMore').addEventListener('click', () => { $('#more').hidden = false; renderChecks(); renderBrain(); });
     $('#checkFilter').addEventListener('input', renderChecks);
     $('#closeMore').addEventListener('click', () => { $('#more').hidden = true; });
     $('#more').addEventListener('click', (e) => { if (e.target.id === 'more') $('#more').hidden = true; });
@@ -119,7 +121,7 @@
 
   function startGame(autoplay = true) {
     pause();
-    const g = new Game(seatDecks(), db, state.seed, { record: true });
+    const g = new Game(seatDecks(), db, state.seed, { record: true, nn: NN });
     g.run();
     state.game = g;
     state.events = g.events;
@@ -315,7 +317,7 @@
     // what is happening now, in the middle of the table
     const now = $('#now');
     now.className = 'now k-' + ev.kind;
-    now.innerHTML = `<div class="now-top"><span class="turn">${ev.turn ? 'Turn ' + ev.turn : 'Setup'}</span>${ev.phase && ev.turn ? `<span class="phase">${esc(g.players[ev.active].name)} · ${esc(ev.phase)}</span>` : ''}${ev.mana && ev.mana.spent.length ? `<span class="paid" title="Mana spent">${manaPips(ev.mana.spent)}</span>` : ''}</div><div class="txt">${ev.seat != null ? `<span class="sw" style="background:${seatSwatch(ev.seat)}"></span>` : ''}${esc(ev.text)}</div>`;
+    now.innerHTML = `<div class="now-top"><span class="turn">${ev.turn ? 'Turn ' + ev.turn : 'Setup'}</span>${ev.phase && ev.turn ? `<span class="phase">${esc(g.players[ev.active].name)} · ${esc(ev.phase)}</span>` : ''}${ev.mana && ev.mana.spent.length ? `<span class="paid" title="Mana spent">${manaPips(ev.mana.spent)}</span>` : ''}</div><div class="txt">${ev.seat != null ? `<span class="sw" style="background:${seatSwatch(ev.seat)}"></span>` : ''}${esc(ev.text)}${nnTag(ev)}</div>${ev.wp ? `<div class="wpbar" title="The neural network's win estimate for each player">${ev.wp.map((w, k) => (w > 0 ? `<i style="flex:${w};background:${seatSwatch(k)}" title="${esc(g.players[k].name)} ${w}%"></i>` : '')).join('')}</div>` : ''}`;
     const stack = snap.stack || [];
     $('#stack').innerHTML = stack.length ? `<span class="zl">Stack</span>${stack.map((id) => cardTile({ id }, true)).join('')}` : '';
     $('#stack').classList.toggle('on', stack.length > 0);
@@ -355,7 +357,7 @@
       return `<section class="${cls} pos${i}" aria-label="${esc(p.name)}">
         <div class="seat-head">
           <div class="pips">${colors.map((c) => `<span class="pip" style="background:${MANA[c]}"></span>`).join('')}</div>
-          <div class="seat-name"><b>${esc(d.name)}</b><small>${esc(d.commander)}</small></div>
+          <div class="seat-name"><b>${esc(d.name)}</b><small>${esc(d.commander)}</small>${ev.wp ? `<span class="wp" title="The neural network's estimate of ${esc(d.name)}'s chance to win from here"><i style="width:${ev.wp[i]}%;background:${seatSwatch(i)}"></i><em>${s.lost ? 'out' : Math.round(ev.wp[i]) + '% to win'}</em></span>` : ''}</div>
           <div class="stats"><span${state.showHands ? '' : ` data-anchor="hand-${i}"`}>Hand <b>${s.hand.length}</b></span><span data-anchor="lib-${i}">Lib <b>${s.lib}</b></span><button type="button" class="zbtn" data-anchor="gy-${i}" data-zone="gy" data-seat="${i}" title="Look through ${esc(d.name)}'s graveyard">GY <b>${s.gy.length}</b></button><button type="button" class="zbtn" data-anchor="ex-${i}" data-zone="ex" data-seat="${i}" title="Look through ${esc(d.name)}'s exile">Exile <b>${s.ex.length}</b></button>${s.poison ? `<span class="cmddmg">Poison <b>${s.poison}</b></span>` : ''}${cmdDmg}</div>
           ${status}
           ${cmdSlot}
@@ -375,7 +377,13 @@
   // The play-by-play only lists what has already happened, so it never spoils the game
   function logItem(e, i) {
     const sw = e.seat != null ? `<span class="sw" style="background:${seatSwatch(e.seat)}"></span>` : '';
-    return `<li data-i="${i}" class="k-${e.kind}">${e.kind === 'turn' ? '' : sw}${esc(e.text)}</li>`;
+    return `<li data-i="${i}" class="k-${e.kind}">${e.kind === 'turn' ? '' : sw}${esc(e.text)}${nnTag(e)}</li>`;
+  }
+  // the network's verdict on a spell when it was cast: how much it moved the caster's chance to win
+  function nnTag(e) {
+    if (e.na == null) return '';
+    const v = e.na; const cls = v >= 1 ? 'good' : v <= -1 ? 'bad' : 'meh';
+    return ` <span class="nnv ${cls}" title="Neural network: casting this changed ${esc(state.game.players[e.seat].name)}'s predicted chance to win by ${v >= 0 ? '+' : ''}${v} points">${v >= 0 ? '+' : ''}${v.toFixed(1)}%</span>`;
   }
   function renderLog() {
     state.logShown = -1;
@@ -439,7 +447,37 @@
     el.hidden = false;
     el.style.setProperty('--frame', frameColor(m.colors));
     const cost = m.cost ? m.cost.split(' ').map((t) => `{${t}}`).join('') : '';
-    el.innerHTML = `<button type="button" class="x" aria-label="Close">×</button><div class="ipic">${artSvg(m, state.inspect)}</div><h3>${esc(m.name)}</h3><div class="cost">${esc(cost)}</div><div class="tl">${esc(m.types)}${m.token ? ' · token' : ''}${m.cmd ? ' · commander' : ''}</div><p>${esc(m.text || '')}</p>${m.pt ? `<div class="ptl">${esc(m.pt)}</div>` : ''}`;
+    // what this card has done so far this game (results are credited to the card that caused them)
+    const tot = {};
+    for (let k = 0; k <= state.idx; k++) for (const [id, stat, n] of state.events[k].cr || []) if (id === state.inspect) tot[stat] = (tot[stat] || 0) + n;
+    const LBL = { dmg: 'damage / life lost', cards: 'cards drawn', tokens: 'tokens made', removed: 'permanents removed', life: 'life gained', mana: 'mana made', countered: 'spells countered', tutored: 'cards tutored' };
+    const did = Object.entries(tot).filter(([, v]) => v).map(([k, v]) => `<span><b>${Math.round(v * 10) / 10}</b> ${LBL[k] || k}</span>`).join('');
+    const learned = NN && state.game && state.meta[state.inspect] ? cardInsight(m.name, state.meta[state.inspect].owner) : '';
+    el.innerHTML = `<button type="button" class="x" aria-label="Close">×</button><div class="ipic">${artSvg(m, state.inspect)}</div><h3>${esc(m.name)}</h3><div class="cost">${esc(cost)}</div><div class="tl">${esc(m.types)}${m.token ? ' · token' : ''}${m.cmd ? ' · commander' : ''}</div><p>${esc(m.text || '')}</p>${m.pt ? `<div class="ptl">${esc(m.pt)}</div>` : ''}${did ? `<div class="did"><small>This game so far</small>${did}</div>` : ''}${learned}`;
+  }
+
+  // the network's average verdict on a card in this deck, from training
+  function cardInsight(name, seat) {
+    const nn = window.POD_DATA.nn; const d = seatDecks()[seat];
+    const ins = nn && nn.insights && d && nn.insights[d.id];
+    if (!ins) return '';
+    const hit = ins.best.concat(ins.worst).find((x) => x.name === name);
+    if (!hit) return '';
+    return `<div class="did"><small>Neural network</small><span>On average casting it moves ${esc(d.name)}'s chance to win by <b>${hit.adv >= 0 ? '+' : ''}${(hit.adv * 100).toFixed(1)}</b> points (${hit.n} casts in training)</span></div>`;
+  }
+  function renderBrain() {
+    const nn = window.POD_DATA.nn; const out = $('#brainOut');
+    if (!nn) { out.innerHTML = '<p>No trained network in this build. Run <code>node train.mjs</code>.</p>'; return; }
+    const name = (id) => (decks.find((d) => d.id === id) || { name: id }).name;
+    const h = nn.history || []; const last = h[h.length - 1] || {};
+    const ab = nn.ab;
+    const pct = (x) => (x * 100).toFixed(1) + '%';
+    out.innerHTML = `<p>A neural network (an MLP with two hidden layers of 48 and 24 units, written in plain JavaScript) trained by self-play: ${nn.games.toLocaleString()} games over ${nn.generation} generations. Every spell cast is recorded with what the board looked like and who went on to win, and the network learns to predict a player's chance to win from the board, with and without the card just played. The difference is how much the card helped. The AI adds that to its scoring when it decides what to cast, what to tutor for and what to discard, and a second network judges opening hands for mulligans. Each generation plays with what the last one learned. The bars on each seat are the network's live estimate.</p>
+      ${ab ? `<p><b>Does it help?</b> In ${ab.games} test games one random seat used the network and the other three played on the plain heuristics: the network seat won <b>${pct(ab.on)}</b> of its games against <b>${pct(ab.off)}</b> for the others (an even share is 25%).</p>
+      <div class="ab">${Object.entries(ab.decks).map(([id, x]) => `<div class="bar-row"><span>${esc(name(id))}</span><div class="bar ab2"><div style="width:${(x.on || 0) * 100}%;background:var(--brass)" title="with network ${pct(x.on || 0)}"></div><div style="width:${(x.off || 0) * 100}%;background:var(--muted)" title="without ${pct(x.off || 0)}"></div></div><span class="v">${x.on != null ? pct(x.on) : '–'} vs ${x.off != null ? pct(x.off) : '–'}</span></div>`).join('')}</div>` : ''}
+      <p><b>Training.</b> ${h.map((x) => `Gen ${x.gen}: prediction loss ${x.qLoss} (guessing the average: ${x.qBase})`).join(' · ')}.</p>
+      <div class="ins">${Object.entries(nn.insights || {}).map(([id, x]) => `<div class="ins-deck"><h4>${esc(name(id))}</h4><ol>${x.best.slice(0, 6).map((c) => `<li><span>${esc(c.name)}</span><b class="${c.adv > 0 ? 'good' : c.adv < 0 ? 'bad' : ''}">${c.adv >= 0 ? '+' : ''}${(c.adv * 100).toFixed(1)}</b></li>`).join('')}</ol><small>Least helpful when cast</small><ol>${x.worst.slice(0, 3).map((c) => `<li><span>${esc(c.name)}</span><b class="${c.adv < 0 ? 'bad' : ''}">${c.adv >= 0 ? '+' : ''}${(c.adv * 100).toFixed(1)}</b></li>`).join('')}</ol></div>`).join('')}</div>
+      <p class="note">Points are the change in the caster's predicted chance to win when the card is cast, averaged over training games. These are also the tutor targets the AI prefers.</p>`;
   }
 
   // ---------- batch stats ----------
@@ -458,7 +496,7 @@
         // rotate seating so turn order doesn't favour one deck
         const rot = done % 4;
         const order = [0, 1, 2, 3].map((k) => (k + rot) % 4);
-        const g = new Game(order.map((k) => ds[k]), db, base + done, { record: false }).run();
+        const g = new Game(order.map((k) => ds[k]), db, base + done, { record: false, nn: NN }).run();
         if (g.winner == null) draws++; else wins[order[g.winner]]++;
         rounds += g.round; done++;
       }

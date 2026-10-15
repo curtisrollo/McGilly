@@ -22,10 +22,13 @@ const slim = Object.fromEntries(Object.entries(db).filter(([k]) => used.has(k)))
 const art = { map: JSON.parse(read('src/art-map.json')), icons: JSON.parse(read('vendor/game-icons-subset.json')).icons };
 const vpath = path.join(ROOT, 'data', 'validation.json');
 const validation = fs.existsSync(vpath) ? (({ when, checks, cards, passed, failed, results }) => ({ when, checks, cards, passed, failed, results: results.map((r) => [r.card, r.test, r.ok ? 1 : 0]) }))(JSON.parse(fs.readFileSync(vpath, 'utf8'))) : null;
-const data = JSON.stringify({ decks, db: slim, art, validation }).replace(/</g, '\\u003c');
+const npath = path.join(ROOT, 'data', 'nn.json');
+const nn = fs.existsSync(npath) ? JSON.parse(fs.readFileSync(npath, 'utf8')) : null;
+const data = JSON.stringify({ decks, db: slim, art, validation, nn }).replace(/</g, '\\u003c');
 const html = read('src/template.html')
   .replace('/*STYLE*/', () => read('src/style.css'))
   .replace('/*DATA*/', () => data)
+  .replace('/*NN*/', () => read('src/nn.js'))
   .replace('/*ENGINE*/', () => read('src/engine.js'))
   .replace('/*UI*/', () => read('src/ui.js'))
   .replace('/*DECKCOUNT*/', () => decks.map((d) => `${d.name} (${d.cards.reduce((s, c) => s + c.qty, 0) + 1} cards)`).join(', '));

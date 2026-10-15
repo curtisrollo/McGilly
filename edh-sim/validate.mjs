@@ -367,6 +367,13 @@ scen('Kaalia of the Vast', 'attacks when there is an Angel, Demon or Dragon in h
   g.combat(me);
   return { ok: me.bf.some((c) => c.name === 'Lyra Dawnbringer'), note: me.bf.some((c) => c.name === 'Lyra Dawnbringer') ? '' : 'Kaalia stayed home' };
 });
+scen('Kaalia of the Vast', 'with Aurelia, Kaalia triggers in both combats', () => {
+  const g = table(); const [me] = g.players; const k = put(g, me, 'Kaalia of the Vast'); k.isCommander = true; put(g, me, 'Aurelia, the Warleader');
+  card(g, me, 'Lyra Dawnbringer', 'hand'); card(g, me, 'Archangel of Thune', 'hand');
+  g.combat(me);
+  const n = ['Lyra Dawnbringer', 'Archangel of Thune'].filter((nm) => me.bf.some((c) => c.name === nm)).length;
+  return { ok: n === 2, note: `${n} of 2 put in` };
+});
 scen('combat', 'a big creature does not attack into an untapped deathtouch blocker', () => {
   const g = table(); const [me, opp] = g.players; const big = put(g, me, 'Craterhoof Behemoth');
   for (const q of g.players.slice(1)) put(g, q, 'Vampire Nighthawk');

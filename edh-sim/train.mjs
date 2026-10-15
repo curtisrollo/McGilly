@@ -1,81 +1,119 @@
-// Learns which cards matter from simulated games.
-// Plays many four-player games, credits every result to the card that caused it, and compares
-// each deck's win rate when a card was cast against its win rate overall. The result,
-// data/learned.json, is used by the AI to decide what to cast first, what to tutor for and
-// which opening hands to keep. Run it again and the AI trains on games played with what it
-// already learned.
-// Usage: node train.mjs [games=1200] [--fresh]
+// Trains the neural network by self-play.
+// Each generation plays a batch of four-player games. Every spell cast is recorded with what the board
+// looked like and who went on to win. The network learns to predict, from the board plus a card, the
+// chance that player wins: V (board only) and Q (board + the card just cast). Q − V is how much a card
+// helps right then, and the AI uses it when choosing what to cast, what to tutor for and what to discard.
+// A second, smaller network learns which opening hands win, for mulligans. The next generation plays
+// with what the last one learned (plus a little randomness so it keeps seeing new lines).
+// At the end, an A/B test plays games where one seat uses the network and the others don't.
+// Usage: node train.mjs [--gens 4] [--games 500] [--ab 400] [--fresh]
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { parseDeck } from './fetch-cards.mjs';
 const require = createRequire(import.meta.url);
 const { Game, rng } = require('./src/engine.js');
+const { MLP } = require('./src/nn.js');
 
-const N = +process.argv.find((a) => /^\d+$/.test(a)) || 1200;
-const fresh = process.argv.includes('--fresh');
+const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i >= 0 ? +process.argv[i + 1] : d; };
+const GENS = arg('gens', 4), N = arg('games', 500), AB = arg('ab', 400), fresh = process.argv.includes('--fresh');
+const OUT = 'data/nn.json';
 const db = JSON.parse(fs.readFileSync('data/cards.json', 'utf8'));
-const ids = fs.readdirSync('decks').filter((f) => f.endsWith('.txt')).map((f) => f.replace('.txt', ''));
+const ids = fs.readdirSync('decks').filter((f) => f.endsWith('.txt')).map((f) => f.replace('.txt', '')).sort();
 const decks = ids.map((id) => ({ id, name: id, ...parseDeck(fs.readFileSync(`decks/${id}.txt`, 'utf8')) }));
-const OUT = 'data/learned.json';
-const prev = !fresh && fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : null;
+const vocab = [...new Set(decks.flatMap((d) => [d.commander, ...d.cards.map((c) => c.name)]))].sort();
+const vIdx = new Map(vocab.map((n, i) => [n, i]));
+const nDense = Game.NN_STATE + Game.NN_CARD + 1 + ids.length;
+const nHand = 11 + ids.length;
 
-// per deck: games, wins; per deck+card: drawn (seen), cast, winsWhenCast, value totals
-const D = Object.fromEntries(ids.map((id) => [id, { games: 0, wins: 0, cards: {} }]));
-const R = rng(prev ? (prev.generation || 1) * 7919 : 4242);
-const t0 = Date.now();
-for (let g = 0; g < N; g++) {
-  const pod = R.shuffle(decks.slice()).slice(0, 4);
-  const game = new Game(pod, db, 100000 + (prev ? prev.generation * N : 0) + g, { record: false, learned: prev && prev.decks }).run();
-  pod.forEach((d, seat) => {
-    const dd = D[d.id];
-    dd.games++;
-    const won = game.winner === seat;
-    if (won) dd.wins++;
-    const seen = new Set();
-    for (const c of game.casts) if (c.seat === seat && !seen.has(c.name)) {
-      seen.add(c.name);
-      const k = dd.cards[c.name] || (dd.cards[c.name] = { cast: 0, wins: 0, value: 0, dmg: 0, cards: 0, tokens: 0, removed: 0, mana: 0, turn: 0 });
-      k.cast++; if (won) k.wins++; k.turn += c.turn;
-    }
-    for (const st of Object.values(game.stats)) if (st.seat === seat && !st.token && dd.cards[st.name]) {
-      const k = dd.cards[st.name];
-      k.value += Game.cardValue(st);
-      for (const f of ['dmg', 'cards', 'tokens', 'removed', 'mana']) k[f] += st[f] || 0;
-    }
-  });
-  if ((g + 1) % 200 === 0) process.stdout.write(`  ${g + 1}/${N} games (${((Date.now() - t0) / 1000).toFixed(0)}s)\n`);
+let prev = !fresh && fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : null;
+if (prev && (prev.vocab.length !== vocab.length || prev.q.nDense !== nDense)) { console.log('Card pool or features changed: starting fresh.'); prev = null; }
+let q = prev ? MLP.fromJSON(prev.q) : new MLP(nDense, vocab.length, [48, 24], 7);
+let m = prev && prev.m ? MLP.fromJSON(prev.m) : new MLP(nHand, vocab.length, [16], 11);
+const history = prev ? prev.history || [] : [];
+let gen = prev ? prev.generation : 0;
+const buffer = []; // last few generations of samples
+const R = rng(1234 + gen);
+
+const deckOneHot = (id) => ids.map((x) => (x === id ? 1 : 0));
+function toQ(s, y) {
+  const d = s.st.concat(s.card, [0], deckOneHot(s.deck));
+  const v = s.st.concat(new Array(Game.NN_CARD).fill(0), [1], deckOneHot(s.deck));
+  const k = vIdx.get(s.name);
+  return [{ d, s: k != null ? [k] : [], y }, { d: v, s: [], y, w: 0.5 }];
 }
-
-// Turn counts into priorities. "lift" = how much more often the deck wins when it casts the card,
-// shrunk toward zero for cards seen only a few times; "impact" = average value produced per game cast.
-const out = { generation: (prev ? prev.generation : 0) + 1, games: N + (prev ? prev.games : 0), when: new Date().toISOString(), decks: {} };
-for (const id of ids) {
-  const dd = D[id];
-  const base = dd.wins / Math.max(1, dd.games);
-  const K = 12; // smoothing strength
-  const cards = {};
-  const impacts = Object.values(dd.cards).map((k) => k.value / k.cast);
-  const meanImpact = impacts.reduce((a, b) => a + b, 0) / Math.max(1, impacts.length);
-  for (const [name, k] of Object.entries(dd.cards)) {
-    const rate = (k.wins + K * base) / (k.cast + K);
-    const lift = rate - base;
-    const impact = k.value / k.cast;
-    // blend with the previous generation so learning is steady rather than jumpy
-    const old = prev && prev.decks[id] && prev.decks[id].cards[name];
-    const n = old ? old.n + k.cast : k.cast;
-    const blend = (a, b, wa, wb) => (a * wa + b * wb) / Math.max(1, wa + wb);
-    const L = old ? blend(old.lift, lift, old.n, k.cast) : lift;
-    const I = old ? blend(old.impact, impact, old.n, k.cast) : impact;
-    const pri = Math.max(-1, Math.min(1, L * 4 + (I - meanImpact) / Math.max(4, meanImpact * 2)));
-    cards[name] = { n, lift: +L.toFixed(4), impact: +I.toFixed(2), pri: +pri.toFixed(3), avgTurn: +(k.turn / k.cast).toFixed(1),
-      per: { dmg: +(k.dmg / k.cast).toFixed(1), cards: +(k.cards / k.cast).toFixed(1), tokens: +(k.tokens / k.cast).toFixed(1), removed: +(k.removed / k.cast).toFixed(1), mana: +(k.mana / k.cast).toFixed(1) } };
+function play(n, seed0, nn, explore) {
+  const out = [], hands = [], wins = Object.fromEntries(ids.map((id) => [id, [0, 0]]));
+  for (let g = 0; g < n; g++) {
+    const pod = R.shuffle(decks.slice()).slice(0, 4);
+    const game = new Game(pod, db, seed0 + g, { record: false, collect: true, nn, explore }).run();
+    const y = (seat) => (game.winner === seat ? 1 : game.winner == null ? 0.25 : 0);
+    for (const s of game.samples) out.push(...toQ(s, y(s.seat)));
+    for (const h of game.mullSamples) hands.push({ d: h.d.slice(0, 11).concat(deckOneHot(h.deck)), s: h.names.map((nm) => vIdx.get(nm)).filter((k) => k != null), y: y(h.seat) });
+    pod.forEach((d, seat) => { wins[d.id][1]++; if (game.winner === seat) wins[d.id][0]++; });
+    if ((g + 1) % 100 === 0) process.stdout.write(`    ${g + 1}/${n} games\n`);
   }
-  const oldDeck = prev && prev.decks[id];
-  out.decks[id] = { games: dd.games + (oldDeck ? oldDeck.games : 0), winRate: +(((dd.wins + (oldDeck ? oldDeck.winRate * oldDeck.games : 0)) / (dd.games + (oldDeck ? oldDeck.games : 0)))).toFixed(4), cards };
+  return { out, hands, wins };
 }
-fs.writeFileSync(OUT, JSON.stringify(out));
-console.log(`\nGeneration ${out.generation}: learned from ${N} games (${out.games} total) in ${((Date.now() - t0) / 1000).toFixed(0)}s.`);
-for (const id of ids) {
-  const top = Object.entries(out.decks[id].cards).filter(([, c]) => c.n >= 15).sort((a, b) => b[1].pri - a[1].pri).slice(0, 5);
-  console.log(`  ${id.padEnd(10)} win ${(out.decks[id].winRate * 100).toFixed(1)}%  best: ${top.map(([n, c]) => `${n} (${c.lift >= 0 ? '+' : ''}${(c.lift * 100).toFixed(0)}%)`).join(', ')}`);
+function fit(net, data, epochs, lr) {
+  const idx = data.map((_, i) => i);
+  const split = Math.floor(data.length * 0.9);
+  R.shuffle(idx);
+  const tr = idx.slice(0, split).map((i) => data[i]), va = idx.slice(split).map((i) => data[i]);
+  for (let e = 0; e < epochs; e++) { R.shuffle(tr); for (let i = 0; i < tr.length; i += 64) net.trainBatch(tr.slice(i, i + 64), lr); }
+  // validation: log loss of the net vs always guessing the average
+  const mean = tr.reduce((a, x) => a + x.y, 0) / tr.length;
+  let L = 0, L0 = 0, W = 0;
+  for (const x of va) { const w = x.w ?? 1; const p = net.forward(x.d, x.s); L += -w * (x.y * Math.log(p + 1e-7) + (1 - x.y) * Math.log(1 - p + 1e-7)); L0 += -w * (x.y * Math.log(mean) + (1 - x.y) * Math.log(1 - mean)); W += w; }
+  return { loss: L / W, base: L0 / W };
 }
+const pack = () => ({ q: q.toJSON(), m: m.toJSON(), vocab, decks: ids });
+
+const t0 = Date.now();
+let base = prev ? prev.base : {};
+for (let k = 0; k < GENS; k++) {
+  gen++;
+  const nn = gen > 1 || prev ? Game.loadNN({ ...pack(), base, generation: gen - 1 }) : null;
+  console.log(`Generation ${gen}: playing ${N} games ${nn ? 'with the network' : 'with the plain heuristics'}...`);
+  const { out, hands, wins } = play(N, 100000 * gen, nn, 6);
+  buffer.push({ out, hands }); if (buffer.length > 3) buffer.shift();
+  base = Object.fromEntries(ids.map((id) => [id, wins[id][1] ? wins[id][0] / wins[id][1] : 0.25]));
+  const qs = fit(q, buffer.flatMap((b) => b.out), 4, 0.002);
+  const ms = fit(m, buffer.flatMap((b) => b.hands), 6, 0.003);
+  history.push({ gen, games: N, samples: out.length, qLoss: +qs.loss.toFixed(4), qBase: +qs.base.toFixed(4), mLoss: +ms.loss.toFixed(4), mBase: +ms.base.toFixed(4) });
+  console.log(`  win-chance network: validation loss ${qs.loss.toFixed(4)} vs ${qs.base.toFixed(4)} guessing the average; hand network ${ms.loss.toFixed(4)} vs ${ms.base.toFixed(4)} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
+}
+
+// What the network learned about each card: average advantage (Q − V) over the times it was cast
+const nnAll = Game.loadNN({ ...pack(), base, generation: gen });
+const adv = {};
+for (const b of buffer) for (let i = 0; i < b.out.length; i += 2) {
+  const s = b.out[i], v = b.out[i + 1];
+  if (!s.s.length) continue;
+  const name = vocab[s.s[0]], deck = ids[s.d.slice(-ids.length).indexOf(1)];
+  const a = nnAll.q.forward(s.d, s.s) - nnAll.q.forward(v.d, v.s);
+  const k = (adv[deck] = adv[deck] || {})[name] || (adv[deck][name] = { n: 0, sum: 0 });
+  k.n++; k.sum += a;
+}
+const insights = Object.fromEntries(Object.entries(adv).map(([deck, cards]) => {
+  const list = Object.entries(cards).filter(([, k]) => k.n >= 8).map(([name, k]) => ({ name, adv: +(k.sum / k.n).toFixed(4), n: k.n })).sort((a, b) => b.adv - a.adv);
+  return [deck, { best: list.slice(0, 10), worst: list.slice(-5).reverse() }];
+}));
+
+// A/B test: one random seat lets the network steer, the other three use the plain heuristics
+console.log(`A/B test: ${AB} games, one seat with the network...`);
+const S = Object.fromEntries(ids.map((id) => [id, { on: 0, onW: 0, off: 0, offW: 0 }]));
+for (let g = 0; g < AB; g++) {
+  const pod = R.shuffle(decks.slice()).slice(0, 4);
+  const seat = Math.floor(R() * 4);
+  const game = new Game(pod, db, 900000 + g, { record: false, nn: nnAll, nnSeats: [seat] }).run();
+  pod.forEach((d, i) => { const s = S[d.id]; if (i === seat) { s.on++; if (game.winner === i) s.onW++; } else { s.off++; if (game.winner === i) s.offW++; } });
+}
+let on = 0, onW = 0, off = 0, offW = 0;
+for (const id of ids) { const s = S[id]; on += s.on; onW += s.onW; off += s.off; offW += s.offW; }
+const ab = { games: AB, on: +(onW / on).toFixed(4), off: +(offW / off).toFixed(4), decks: Object.fromEntries(ids.map((id) => [id, { on: S[id].on ? +(S[id].onW / S[id].on).toFixed(3) : null, off: S[id].off ? +(S[id].offW / S[id].off).toFixed(3) : null, n: S[id].on }])) };
+history[history.length - 1].ab = { on: ab.on, off: ab.off };
+for (const id of ids) { const s = S[id]; console.log(`  ${id.padEnd(10)} with network ${(s.onW / Math.max(1, s.on) * 100).toFixed(1).padStart(5)}% (${s.on} games)  without ${(s.offW / Math.max(1, s.off) * 100).toFixed(1).padStart(5)}%`); }
+console.log(`  ALL        with network ${(ab.on * 100).toFixed(1)}%  without ${(ab.off * 100).toFixed(1)}%  (${ab.on >= ab.off ? '+' : ''}${((ab.on - ab.off) * 100).toFixed(1)} points; 25% is an even share)`);
+
+fs.writeFileSync(OUT, JSON.stringify({ generation: gen, games: (prev ? prev.games : 0) + GENS * N, when: new Date().toISOString(), ...pack(), base, history, insights, ab }));
+console.log(`Wrote ${OUT} (generation ${gen}, ${((Date.now() - t0) / 1000).toFixed(0)}s).`);

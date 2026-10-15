@@ -872,8 +872,11 @@
       this.casts = [];      // every spell cast: { seat, name, turn }
       this._ctx = [];       // stack of cards whose effects are resolving (for credit)
       this._crBuf = [];
-      this.learned = opts.learned || null;          // learned card priorities per deck
-      this.learnSeats = opts.learnSeats || null;    // which seats use them (default: all)
+      this.nn = opts.nn || null;                    // trained neural network (see train.mjs), loaded with Game.loadNN
+      this.nnSeats = opts.nnSeats || null;          // which seats let it steer their choices (default: all)
+      this.collect = !!opts.collect;                // record training samples (state, card) for train.mjs
+      this.explore = opts.explore || 0;             // random noise on choices while training, so the net sees variety
+      this.samples = []; this.mullSamples = [];
     }
 
     // ----- statistics: credit each result to the card that caused it -----
@@ -885,12 +888,76 @@
       st[stat] = (st[stat] || 0) + n;
       if (this.record) this._crBuf.push([t.id, stat, n]);
     }
-    // Learned priority for a card in this player's deck (-1..1), from train.mjs; 0 if unknown or not learning
-    learnedPri(p, name) {
-      if (!this.learned || (this.learnSeats && !this.learnSeats.includes(p.seat))) return 0;
-      const c = this.learned[p.deckId] && this.learned[p.deckId].cards[name];
-      if (!c || c.n < 8) return 0;
-      return c.pri * Math.min(1, c.n / 40);
+    // ----- neural network -----
+    // The network looks at the board from one player's side plus (optionally) a card they could play,
+    // and predicts the chance that player goes on to win. V = chance from here; Q = chance after
+    // playing that card. Q - V (the advantage) is how much the card helps right now.
+    static loadNN(j) {
+      const { MLP } = typeof module !== 'undefined' && module.exports ? require('./nn.js') : root.PodNN;
+      return { q: MLP.fromJSON(j.q), m: j.m ? MLP.fromJSON(j.m) : null, vocab: new Map(j.vocab.map((n, i) => [n, i])), decks: j.decks, base: j.base || {}, gen: j.generation };
+    }
+    nnSample(p, c, from) { return { seat: p.seat, deck: p.deckId, name: c.name, from, st: this.nnState(p), card: this.nnCard(p, c, from), turn: this.round }; }
+    nnOn(p) { return !!this.nn && (!this.nnSeats || this.nnSeats.includes(p.seat)); }
+    nnState(p) {
+      const opps = this.opps(p);
+      const crs = (q) => q.bf.filter((c) => c.info.isCreature);
+      const pow = (q) => crs(q).reduce((s2, c) => s2 + Math.max(0, this.power(c)), 0);
+      const lives = opps.map((q) => q.life);
+      const mine = this.playerThreat(p), oppMax = Math.max(0, ...opps.map((q) => this.playerThreat(q)));
+      return [
+        Math.min(this.round, 20) / 15, p.life / 40, (lives.length ? Math.min(...lives) : 0) / 40, (lives.length ? lives.reduce((a, b) => a + b, 0) / lives.length : 0) / 40,
+        p.bf.filter((c) => c.info.isLand).length / 10, crs(p).length / 10, pow(p) / 30, Math.max(0, ...opps.map(pow)) / 30,
+        p.hand.length / 10, (opps.length ? opps.reduce((s2, q) => s2 + q.hand.length, 0) / opps.length : 0) / 10, opps.length / 3,
+        mine / 50, oppMax / 50, (mine - oppMax) / 50, p.bf.some((c) => c.isCommander) ? 1 : 0, p.tax / 3, p.gy.length / 30,
+        this.availableMana(p) / 12, Math.max(0, ...opps.map((q) => q.poison)) / 10, p.bf.filter((c) => !c.info.isLand && !c.info.isCreature).length / 10,
+        p.library.length / 100, Math.max(0, ...Object.values(p.cmdDmg)) / 21, this.active === p.seat ? 1 : 0, 1,
+      ];
+    }
+    nnCard(p, c, from) {
+      const i = c.info;
+      const fx = (i.isPermanent ? i.etb : i.spell).concat(i.triggers.flatMap((t) => t.fx || []), i.activated.flatMap((a) => a.fx || []), i.dies);
+      const has = (...k) => (fx.some((f) => k.includes(f.k)) ? 1 : 0);
+      return [
+        (i.mv || 0) / 8, i.isCreature ? 1 : 0, i.isInstant ? 1 : 0, i.isSorcery ? 1 : 0, i.isPW ? 1 : 0, i.types.has('Artifact') ? 1 : 0, i.types.has('Enchantment') ? 1 : 0,
+        i.mana ? 1 : 0, (i.power || 0) / 8, (i.toughness || 0) / 8, (i.kw ? i.kw.size : 0) / 5, from === 'command' ? 1 : 0, from === 'gy' ? 1 : 0, i.cost.x ? 1 : 0,
+        has('ramp', 'treasure', 'ritual'), has('draw', 'loot', 'wheel', 'impulse', 'dig'), has('tutor', 'search', 'tutorBF'), has('tokens'), has('removal', 'steal', 'exchange', 'edict', 'edictAll'), has('wipe', 'massBounce'),
+        has('reanimate', 'massReanimate', 'regrow'), has('drain', 'drainOne', 'hailfire', 'damage'), has('extraTurn', 'extraCombat'), has('counter', 'protect'), has('counters', 'pump', 'overrun', 'proliferate'), has('gain'), has('discard', 'discardAll'),
+        this.completesCombo(p, c) ? 1 : 0, i.triggers.length ? 1 : 0, i.statics.length ? 1 : 0,
+      ];
+    }
+    nnInput(p, c, from) {
+      const st = this.nnState(p);
+      const deck = this.nn.decks.map((d) => (d === p.deckId ? 1 : 0));
+      const card = c ? this.nnCard(p, c, from) : new Array(Game.NN_CARD).fill(0);
+      const k = c ? this.nn.vocab.get(c.name) : undefined;
+      return { d: st.concat(card, [c ? 0 : 1], deck), s: k != null ? [k] : [] };
+    }
+    nnV(p) {
+      const key = p.seat + ':' + this._nnTick;
+      if (this._nnV && this._nnV.key === key) return this._nnV.v;
+      const x = this.nnInput(p, null);
+      const v = this.nn.q.forward(x.d, x.s);
+      this._nnV = { key, v };
+      return v;
+    }
+    nnQ(p, c, from) { const x = this.nnInput(p, c, from); return this.nn.q.forward(x.d, x.s); }
+    // advantage in win probability (about -0.3..0.3); 0 when the network is off for this seat
+    nnAdv(p, c, from = 'hand') { if (!this.nnOn(p)) return 0; return this.nnQ(p, c, from) - this.nnV(p); }
+    // win chances for everyone still in, from the network, normalised to add up to 100%
+    nnWinChances() {
+      const raw = this.players.map((q) => (q.lost ? 0 : Math.max(0.001, (() => { const x = this.nnInput(q, null); return this.nn.q.forward(x.d, x.s); })())));
+      const t = raw.reduce((a, b) => a + b, 0) || 1;
+      return raw.map((x) => Math.round((x / t) * 1000) / 10);
+    }
+    // opening hand features for the mulligan network
+    nnHand(p, hand, mulls) {
+      const lands = hand.filter((c) => c.info.isLand || c.info.mdfcLand).length;
+      const sp = hand.filter((c) => !c.info.isLand && !c.info.mdfcLand);
+      const kinds = (k) => sp.filter((c) => (c.info.isPermanent ? c.info.etb : c.info.spell).some((f) => k.includes(f.k)) || (k.includes('ramp') && c.info.mana)).length;
+      const d = [lands / 7, sp.length / 7, sp.reduce((a, c) => a + c.info.mv, 0) / Math.max(1, sp.length) / 8, sp.filter((c) => c.info.mv <= 2).length / 7, kinds(['ramp', 'treasure', 'ritual']) / 3, kinds(['tutor', 'search', 'tutorBF']) / 2, kinds(['draw', 'loot', 'wheel']) / 3, sp.filter((c) => this.handPlan(p).combo.has(c.name)).length / 2, mulls / 3, hand.length / 7, 1]
+        .concat(this.nn ? this.nn.decks.map((x) => (x === p.deckId ? 1 : 0)) : []);
+      const s = this.nn ? hand.map((c) => this.nn.vocab.get(c.name)).filter((k) => k != null) : [];
+      return { d, s };
     }
     // "A", "A and B", "A, B and 3 more" — groups identical names ("3× Vampire token 1/1")
     // a card's name for the log; tokens say so unless the name already does ("Vampire token")
@@ -1025,11 +1092,14 @@
     pacified(c) { return !!c.neutralized && c.neutralized >= this.turn || this.allBf().some((a) => a.attached === c.id && a.info.statics.some((s) => s.k === 'pacify')); }
 
     emit(kind, text, extra = {}) {
+      this._nnTick = (this._nnTick || 0) + 1;
       if (!this.record) return;
       const ev = { kind, text, seat: extra.seat ?? null, cards: extra.cards || [], turn: this.round, active: this.active, phase: this.phase || '' };
       if (this.pendingMana && ['cast', 'ability', 'counter', 'response', 'combo'].includes(kind)) { ev.mana = this.pendingMana; this.pendingMana = null; }
       if (this._crBuf.length) { ev.cr = this._crBuf; this._crBuf = []; }
       ev.snap = this.snapshot(extra);
+      if (this.nn && this.started) ev.wp = this.nnWinChances();
+      if (extra.nnAdv != null) ev.na = Math.round(extra.nnAdv * 1000) / 10;
       this.events.push(ev);
     }
 
@@ -1119,7 +1189,7 @@
       if (c.info.isLand) for (const x of owner.bf) for (const t of x.info.triggers) if (t.k === 'landToGy') this.resolveEffects(owner, t.fx, x, null, false);
     }
     discardCard(p, c) { this.removeFrom(p.hand, c); this.toGraveyard(c); }
-    discardWorst(p, n = 1) { for (let i = 0; i < n && p.hand.length; i++) { const d = p.hand.slice().sort((a, b) => this.cardValue(p, a) + this.learnedPri(p, a.name) * 6 - this.cardValue(p, b) - this.learnedPri(p, b.name) * 6)[0]; this.discardCard(p, d); } }
+    discardWorst(p, n = 1) { for (let i = 0; i < n && p.hand.length; i++) { const d = p.hand.slice().sort((a, b) => this.cardValue(p, a) + this.nnAdv(p, a) * 40 - this.cardValue(p, b) - this.nnAdv(p, b) * 40)[0]; this.discardCard(p, d); } }
     mill(p, n) { const out = []; for (let i = 0; i < n && p.library.length; i++) { const c = p.library.shift(); this.toGraveyard(c); out.push(c); } return out; }
     tryDredge(p) {
       const loam = p.gy.find((c) => c.info.dredge && p.library.length > c.info.dredge + 5);
@@ -2710,7 +2780,7 @@
       const opp = this.opps(p).map((q) => this.playerThreat(q)).sort((a, b) => b - a)[0] || 0;
       const mine = this.playerThreat(p);
       return pool.slice().sort((a, b) => {
-        const la = this.learnedPri(p, a.name) * 12, lb = this.learnedPri(p, b.name) * 12;
+        const la = this.nnAdv(p, a, 'hand') * Game.NN_WEIGHT, lb = this.nnAdv(p, b, 'hand') * Game.NN_WEIGHT;
         const sa = la + this.cardValue(p, a) - Math.max(0, a.info.mv - avail) * 3 + (opp > mine + 15 && a.info.spell.some((f) => f.k === 'wipe') ? 20 : 0);
         const sb = lb + this.cardValue(p, b) - Math.max(0, b.info.mv - avail) * 3 + (opp > mine + 15 && b.info.spell.some((f) => f.k === 'wipe') ? 20 : 0);
         return sb - sa;
@@ -2894,7 +2964,8 @@
       if (from === 'prepared') s = 30;
       if (!this.payAdditional(p, c, false)) return -1;
       if (!i.isPermanent && fx.length === 0) s = 1; // unmodeled spell: cast it last
-      s += this.learnedPri(p, c.name) * 14;
+      // the neural network's opinion: how much casting this now moves our chance to win
+      if (this.nnOn(p)) { const adv = this.nnAdv(p, c, from); s += adv * Game.NN_WEIGHT; if (this.record) c._nnAdv = adv; }
       if (this.completesCombo(p, c)) s += 60;
       else if (this.comboWants(p).some((w) => w.missing.some((m) => m.name === c.name))) s += 15;
       // an Aura needs something to enchant (Pattern of Rebirth with no creature of ours is not castable)
@@ -2909,6 +2980,7 @@
 
     castSpell(p, c, from, gyType) {
       const i = c.info;
+      const sample = this.collect ? this.nnSample(p, c, from) : null;
       let cost = this.costFor(p, c, from);
       let xVal = 0;
       if (cost.x) { xVal = this.maxX(p, cost); if (xVal < 0) return false; }
@@ -2942,11 +3014,13 @@
       else if (from === 'flashback') { this.removeFrom(p.gy, c); c.flashedBack = true; }
       c.zone = 'stack';
       this.casts.push({ seat: p.seat, name: c.name, turn: this.round, id: c.id });
+      if (sample) this.samples.push(sample);
       { const st = this.stats[c.id] || (this.stats[c.id] = { name: c.name, seat: c.owner }); if (st.cast == null) st.cast = this.round; }
       p.spellsThisTurn = (p.spellsThisTurn || 0) + 1;
       if (!i.types.has('Artifact')) p.nonArtifactSpells = (p.nonArtifactSpells || 0) + 1;
       const fromTxt = { flashback: ' with flashback', command: ' from the command zone', gy: ' from the graveyard', citadel: ' off the top with Bolas\'s Citadel', top: ' off the top with Mystic Forge', valgavoth: ' from Valgavoth\'s exile', dash: ' for its dash cost' }[from] || '';
-      this.emit('cast', `${p.name} casts ${i.name}${xVal ? ` (X=${xVal})` : ''}${kicks ? ` kicked ${kicks}×` : ''}${fromTxt}.`, { seat: p.seat, cards: [c.id], stack: [c.id] });
+      this.emit('cast', `${p.name} casts ${i.name}${xVal ? ` (X=${xVal})` : ''}${kicks ? ` kicked ${kicks}×` : ''}${fromTxt}.`, { seat: p.seat, cards: [c.id], stack: [c.id], nnAdv: c._nnAdv });
+      c._nnAdv = undefined;
       this.castTriggers(p, c, from);
       // Jace emblem: counter each opponent's first spell each turn
       const jace = this.opps(p).find((q) => (q.emblems || []).includes('jaceCounter'));
@@ -3156,8 +3230,13 @@
       score += Math.min(combo.length, 2) * 3; if (combo.length) why.push('combo piece');
       score += Math.min(tribal, 3) * 1.5; if (tribal >= 2) why.push(`${tribal} ${plan.tribe}s`);
       if (L + R >= Math.min(plan.cmdMv, 5) - 1) { score += 3; }
-      const learnedGood = spells.map((c) => this.learnedPri(p, c.name)).filter((x) => x > 0.15);
-      if (learnedGood.length) { score += Math.min(6, learnedGood.reduce((a, b) => a + b, 0) * 6); why.push(`${learnedGood.length} proven card${learnedGood.length > 1 ? 's' : ''}`); }
+      // the mulligan network: predicted win chance with this hand compared with the deck's average
+      if (this.nnOn(p) && this.nn.m) {
+        const x = this.nnHand(p, hand, p._mulls || 0); const pw = this.nn.m.forward(x.d, x.s); const base = this.nn.base[p.deckId] || 0.25;
+        score += Math.max(-10, Math.min(10, (pw - base) * 60));
+        p._handNN = pw;
+        if (pw - base > 0.04) why.push(`network likes it (${Math.round(pw * 100)}%)`); else if (pw - base < -0.04) why.push(`network doubts it (${Math.round(pw * 100)}%)`);
+      }
       if (spells.every((c) => c.info.mv >= 5) && spells.length) { score -= 6; why.push('all expensive'); }
       return { score, why };
     }
@@ -3166,7 +3245,7 @@
       for (let i = 0; i < n; i++) {
         const lands = p.hand.filter((c) => c.info.isLand).length;
         const pool = p.hand.slice().sort((a, b) => {
-          const v = (c) => (c.info.isLand ? (lands > 4 ? 0 : 20) : 10 + this.learnedPri(p, c.name) * 8 + this.cardValue(p, c) - Math.max(0, c.info.mv - 4) * 2 + (this.handPlan(p).combo.has(c.name) ? 8 : 0));
+          const v = (c) => (c.info.isLand ? (lands > 4 ? 0 : 20) : 10 + this.nnAdv(p, c) * 50 + this.cardValue(p, c) - Math.max(0, c.info.mv - 4) * 2 + (this.handPlan(p).combo.has(c.name) ? 8 : 0));
           return v(a) - v(b);
         });
         const worst = pool[0];
@@ -3178,6 +3257,7 @@
       let mulls = 0;
       const lands = () => p.hand.filter((c) => c.info.isLand || c.info.mdfcLand).length;
       for (;;) {
+        p._mulls = mulls;
         const { score, why } = this.scoreHand(p, p.hand);
         const need = [16, 13, 9, 0][Math.min(mulls, 3)];
         if (score >= need || mulls >= 3) { p.keepWhy = why; p.keepScore = Math.round(score); break; }
@@ -3188,6 +3268,7 @@
       // first mulligan is free in multiplayer; after that, one card per mulligan goes to the bottom
       if (mulls > 1) this.bottomCards(p, mulls - 1);
       p.cardsDrawn = 0;
+      if (this.collect) this.mullSamples.push({ seat: p.seat, deck: p.deckId, ...this.nnHand(p, p.hand, mulls), names: p.hand.map((c) => c.name) });
       this.emit('mulligan', `${p.name} keeps ${p.hand.length}${mulls ? ` after ${mulls} mulligan${mulls > 1 ? 's' : ''}` : ''}: ${p.keepWhy.join(', ')}.`, { seat: p.seat });
     }
 
@@ -3397,7 +3478,8 @@
 
     // Spells the AI wants to cast right now and can pay for, best first
     castOptions(p) {
-      return this.castables(p).map((o) => ({ ...o, s: this.scoreCast(p, o.c, o.from) })).filter((o) => o.s > 0)
+      this._nnTick = (this._nnTick || 0) + 1;
+      return this.castables(p).map((o) => ({ ...o, s: this.scoreCast(p, o.c, o.from) })).map((o) => (this.explore && o.s > 0 ? { ...o, s: o.s + this.R() * this.explore } : o)).filter((o) => o.s > 0)
         .filter((o) => this.pay(p, this.costFor(p, o.c, o.from)) && (!o.c.info.cost.x || this.maxX(p, o.c.info.cost) >= this.minX(o.c)))
         .sort((a, b) => b.s - a.s);
     }
@@ -4089,6 +4171,10 @@
       return blocks;
     }
   }
+
+  Game.NN_CARD = 30;      // card features (see nnCard)
+  Game.NN_STATE = 24;     // board features (see nnState)
+  Game.NN_WEIGHT = 150;   // how much a 0.1 swing in win chance is worth when scoring a play
 
   function simulate(decks, db, seed, opts) {
     return new Game(decks, db, seed, opts).run();
