@@ -374,6 +374,17 @@ scen('Kaalia of the Vast', 'with Aurelia, Kaalia triggers in both combats', () =
   const n = ['Lyra Dawnbringer', 'Archangel of Thune'].filter((nm) => me.bf.some((c) => c.name === nm)).length;
   return { ok: n === 2, note: `${n} of 2 put in` };
 });
+scen('paying life', 'no life payment that walks into lethal: Vampiric Tutor, Reanimate, Phyrexian mana, Necropotence', () => {
+  const g = table(); const [me, opp] = g.players;
+  // opponents have a big board: anything below ~20 life is dead next turn
+  for (const q of g.players.slice(1)) put(g, q, 'Craterhoof Behemoth');
+  me.life = 4;
+  const vt = card(g, me, 'Vampiric Tutor', 'hand'); card(g, me, 'Craterhoof Behemoth', 'gy'); const re = card(g, me, 'Reanimate', 'hand');
+  const okVT = g.scoreCast(me, vt, 'hand') < 0, okRe = g.scoreCast(me, re, 'hand') < 0;
+  me.life = 3; const lethal = !g.canPayLife(me, 3) && !g.canPayLife(me, 4);
+  me.life = 60; const fine = g.canPayLife(me, 2);
+  return { ok: okVT && okRe && lethal && fine, note: `VT held ${okVT}, Reanimate held ${okRe}, never lethal ${lethal}, pays when safe ${fine}` };
+});
 scen('combat', 'a big creature does not attack into an untapped deathtouch blocker', () => {
   const g = table(); const [me, opp] = g.players; const big = put(g, me, 'Craterhoof Behemoth');
   for (const q of g.players.slice(1)) put(g, q, 'Vampire Nighthawk');

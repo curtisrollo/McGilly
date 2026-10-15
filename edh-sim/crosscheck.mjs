@@ -43,6 +43,7 @@ const RULES = [
 // Cards whose matching text is handled by machinery outside the effect lists, with the reason.
 const A = (re, why) => ({ re, why });
 const ACK = {
+  'Bloodgift Demon': A(/draw/, 'bloodgift: the chosen player (us, or an opponent when we cannot spare the life) draws and loses 1'),
   'Ancient Tomb': A(/damage/, 'mana ability deals 2 to you when tapped (mana option dmg)'),
   'Battlefield Forge': A(/damage/, 'painland damage on coloured mana (mana option dmg)'),
   'City of Brass': A(/damage/, 'damage whenever tapped (mana option dmg)'),
