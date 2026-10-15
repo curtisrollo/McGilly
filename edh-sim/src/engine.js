@@ -696,7 +696,7 @@
     'Jace, Unraveler of Secrets': (a, cover) => { const ult = a.loyaltyAbs.find((x) => x.delta <= -8); if (ult) ult.fx = [{ k: 'emblem', e: 'jaceCounter' }]; cover(ALL); },
     'Jace, Wielder of Mysteries': (a, cover) => { a.statics = a.statics.filter((x) => x.k !== 'misc'); a.statics.push({ k: 'labman' }); a.loyaltyAbs[0].fx = [{ k: 'mill', n: 2 }, { k: 'draw', n: 1 }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -8); if (ult) ult.fx = [{ k: 'draw', n: 7 }, { k: 'emptyLibraryWin' }]; cover(ALL); },
     'Jace, the Mind Sculptor': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'fateseal' }]; const z = a.loyaltyAbs.find((x) => x.delta === 0); if (z) z.fx = [{ k: 'brainstorm' }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -12); if (ult) ult.fx = [{ k: 'exileLibrary' }]; cover(ALL); },
-    "Jeska's Will": (a, cover) => { a.spell = [{ k: 'jeska' }, { k: 'impulse', n: 3 }]; cover(ALL); },
+    "Jeska's Will": (a, cover) => { a.spell = [{ k: 'jeska' }, { k: 'impulse', n: 3, ifCommander: true }]; cover(ALL); },
     'Junji, the Midnight Sky': (a, cover) => { a.dies = [{ k: 'junji' }]; a.statics = a.statics.filter((x) => x.k !== 'misc'); cover(ALL); },
     'Kaalia, Zenith Seeker': (a, cover) => { a.etb = [{ k: 'dig', n: 6, types: ['angel', 'demon', 'dragon'], all: true }]; cover(ALL); },
     'Kalitas, Traitor of Ghet': (a, cover) => { a.statics = a.statics.filter((x) => x.k !== 'misc'); a.statics.push({ k: 'kalitas' }); a.sacOutlet = { tribes: ['Vampire', 'Zombie'], mana: 3, fx: [{ k: 'counters', n: 2, on: 'self' }] }; cover(ALL); },
@@ -726,7 +726,11 @@
     'Swords to Plowshares': (a, cover) => { a.spell = [{ k: 'removal', what: 'creature', exile: true, comp: 'life' }]; cover(ALL); },
     'Path to Exile': (a, cover) => { a.spell = [{ k: 'removal', what: 'creature', exile: true, comp: 'land' }]; cover(ALL); },
     'Majestic Genesis': (a, cover) => { a.spell = [{ k: 'genesis', majestic: true }]; cover(ALL); },
-    'Mystic Forge': (a, cover) => { a.statics.push({ k: 'castTop', what: 'artifact' }); a.activated = [{ tap: true, life: 1, cost: parseCost(''), fx: [{ k: 'millTop' }], text: 'Exile the top card of your library.', lowPriority: true }]; cover(ALL); },
+    'Mystic Forge': (a, cover) => { a.statics.push({ k: 'castTop', what: 'artifact' }); a.activated = [{ tap: true, life: 1, cost: parseCost(''), fx: [{ k: 'exileTop' }], text: 'Exile the top card of your library.', lowPriority: true }]; cover(ALL); },
+    'Ichor Wellspring': (a, cover) => { a.etb = [{ k: 'draw', n: 1 }]; a.gyDraw = 1; cover(ALL); },
+    'Gamble': (a, cover) => { a.spell = [{ k: 'tutor', what: 'card' }, { k: 'discardSelf', n: 1, random: true }]; cover(ALL); },
+    'Moonsilver Key': (a, cover) => { if (a.activated[0]) a.activated[0].fx = [{ k: 'tutor', what: 'manaArtifact' }]; cover(ALL); },
+    'Aetherflux Reservoir': (a, cover) => { if (a.castTrig[0]) a.castTrig[0].fx = [{ k: 'gain', n: 'SPELLS' }]; cover(ALL); },
     'Narset, Parter of Veils': (a, cover) => { a.statics.push({ k: 'narset' }); const m2 = a.loyaltyAbs.find((x) => x.delta === -2); if (m2) m2.fx = [{ k: 'dig', n: 4, types: ['noncreature', 'nonland'] }]; cover(ALL); },
     'Necromancy': (a, cover) => { a.reanimAura = true; a.etb = [{ k: 'reanimate', any: true }]; cover(ALL); },
     'Necropotence': (a, cover) => { cover(ALL); },
@@ -1100,7 +1104,7 @@
       if (c.hexproofEOT) s.add('hexproof');
       if (c.info.statics.some((x) => x.k === 'myrkul') && ctrl.life <= 20) s.add('indestructible');
       if (c.info.hasteIfOppLow && this.opps(ctrl).some((q) => q.life <= c.info.hasteIfOppLow)) s.add('haste');
-      if (c.info.types.has('Artifact') && c.info.isCreature && this.has(ctrl, 'artifactHaste')) s.add('haste');
+      if (c.info.types.has('Artifact') && c.info.isCreature && ctrl.bf.some((x) => x !== c && x.info.statics.some((st) => st.k === 'artifactHaste'))) s.add('haste');
       if (c.info.types.has('Enchantment') && this.statics(ctrl, 'enchShroud').some(({ c: src }) => src !== c)) s.add('shroud');
       if (this.statics(ctrl, 'enchShroud').some(({ s: st }) => st.enchantedToo) && ctrl.bf.some((a) => a.attached === c.id && a.info.isAura)) s.add('shroud');
       if (c.indCounter) s.add('indestructible');
@@ -1222,7 +1226,9 @@
       this.leaveBattlefield(c);
       if (c.token) return;
       if (c.isCommander) { c.zone = 'command'; owner.command.push(c); this.emit('move', `${c.info.name} returns to the command zone.`, { seat: owner.seat, cards: [c.id] }); return; }
+      if (fromBf && c.info.statics.some((st) => st.k === 'nexus')) { c.zone = 'exile'; owner.exile.push(c); owner.extraTurn = (owner.extraTurn || 0) + 1; this.emit('effect', `Ugin's Nexus is exiled instead and ${owner.name} takes an extra turn.`, { seat: owner.seat, cards: [c.id] }); return; }
       if (fromBf && wasArtifact && (ctrl.emblems || []).includes('artifactRecursion')) { ctrl.delayedReturn = ctrl.delayedReturn || []; ctrl.delayedReturn.push(c); }
+      if (fromBf && c.info.gyDraw) { this.toGraveyard(c, ctrl.seat); this.draw(ctrl, c.info.gyDraw); this.emit('draw', `${c.info.name} was put into the graveyard: ${ctrl.name} draws a card.`, { seat: ctrl.seat, cards: [c.id] }); return; }
       this.toGraveyard(c, ctrl.seat);
     }
     // Every card headed to a graveyard goes through here (replacement effects live here)
@@ -1540,10 +1546,16 @@
       return COMBOS.some((combo) => combo.pieces.some((alts) => alts.includes(card.name)) && combo.pieces.every((alts) => alts.includes(card.name) || alts.some((n) => p.bf.some((c) => c.name === n))));
     }
     infiniteMana(p) {
-      const mono = p.bf.find((c) => c.name === 'Basalt Monolith');
-      return !!(mono && p.bf.some((c) => c.name === 'Rings of Brighthearth') && !this.locked(p) && (!mono.tapped || this.availableMana(p) >= 3));
+      const mono = p.bf.find((c) => c.info.name === 'Basalt Monolith');
+      if (!mono || this.locked(p) || !(!mono.tapped || this.availableMana(p) >= 3)) return false;
+      const rings = p.bf.some((c) => c.info.statics.some((st) => st.k === 'rings'));
+      const monument = p.bf.some((c) => c.info.monument); // Monolith taps for 4, untap costs 3
+      const zirda = this.statics(p, 'reduceAbilities').length; // untap costs 1, makes 3
+      return !!(rings || monument || zirda);
     }
     locked(p) { return this.opps(p).some((q) => this.has(q, 'karn')) && this.alive().some((q) => this.has(q, 'lattice')); }
+    // Karn, the Great Creator: activated abilities of artifacts your opponents control can't be activated
+    karnStops(p, c) { return c.info.types.has('Artifact') && this.opps(p).some((q) => this.has(q, 'karn')); }
 
     // Check for infinite combos on p's board and cash them in
     // Myrkul + Devoted Druid: let the Druid die to its own -1/-1 counters; Myrkul brings it back as an
@@ -1711,6 +1723,7 @@
       for (const c of p.bf) {
         const m = c.info.mana;
         if (!m || c.tapped) continue;
+        if (this.karnStops(p, c)) continue;
         if (c.info.isCreature && c.sick && !this.hasKw(c, 'haste') && !this.has(p, 'elixir')) continue;
         let opts = m.opts;
         if (c.info.cradle) { const n = p.bf.filter((x) => x.info.isCreature).length; if (!n) continue; opts = [{ colors: ['G'], amount: n, dmg: 0 }]; }
@@ -2040,7 +2053,7 @@
       if (fx.sevenNames && new Set(p.bf.filter((c) => c.info.isLand).map((c) => c.name)).size < 7) return;
       if (fx.ifColor && !(this._entering && this._entering.info.colors && this._entering.info.colors.has(fx.ifColor))) return;
       if (fx.nontoken && this._entering && this._entering.token) return;
-      const X = (v) => (v === 'X' ? Math.max(0, xVal) : v === 'X2' ? 2 * Math.max(0, xVal) : v === 'TRIBE' ? p.bf.filter((c) => c.info.isCreature && this.isType(c, fx.tribe)).length : v === 'D20' ? 1 + this.R.int(20) : v);
+      const X = (v) => (v === 'X' ? Math.max(0, xVal) : v === 'X2' ? 2 * Math.max(0, xVal) : v === 'TRIBE' ? p.bf.filter((c) => c.info.isCreature && this.isType(c, fx.tribe)).length : v === 'D20' ? 1 + this.R.int(20) : v === 'SPELLS' ? (p.spellsThisTurn || 1) : v);
       if (fx.unlessHave && p.bf.some((c) => this.isType(c, fx.unlessHave))) return;
       switch (fx.k) {
         case 'draw': if (fx.n) this.draw(p, X(fx.n) || 0); if (fx.n && (!quiet || src)) this.emit('draw', `${p.name} draws ${X(fx.n)} off ${name}.`, { seat: p.seat, cards: src ? [src.id] : [] }); break;
@@ -2367,6 +2380,7 @@
           if (!quiet) this.emit('effect', `${name}: ${p.name} mills ${milled.length}.`, { seat: p.seat, cards: src ? [src.id] : [] });
           break;
         }
+        case 'exileTop': { const c = p.library.shift(); if (c) { c.zone = 'exile'; p.exile.push(c); if (!quiet) this.emit('effect', `${name}: ${p.name} exiles ${c.info.name} from the top of their library.`, { seat: p.seat, cards: [c.id] }); } break; }
         case 'millTop': { const c = p.library.shift(); if (c) { c.zone = 'hand'; c.impulseTurn = this.turn; p.hand.push(c); } break; }
         case 'scry': {
           for (let i = 0; i < fx.n && i < p.library.length; i++) {
@@ -2534,7 +2548,7 @@
           break;
         }
         case 'fog': this.fogTurn = this.turn; this.emit('response', `${name}: all combat damage this turn is prevented.`, { seat: p.seat }); break;
-        case 'impulse': { const top = p.library.splice(0, fx.n); for (const c of top) { c.zone = 'hand'; c.impulseTurn = this.turn; p.hand.push(c); } this.emit('draw', `${name}: ${p.name} exiles the top ${top.length} and may play them this turn.`, { seat: p.seat }); break; }
+        case 'impulse': { if (fx.ifCommander && !p.bf.some((c) => c.isCommander)) break; const top = p.library.splice(0, fx.n); for (const c of top) { c.zone = 'hand'; c.impulseTurn = this.turn; p.hand.push(c); } this.emit('draw', `${name}: ${p.name} exiles the top ${top.length} and may play them this turn.`, { seat: p.seat }); break; }
         case 'jeska': { const n = Math.max(0, ...this.opps(p).map((q) => q.hand.length)); this.addFloating(p, 'R', n); this.emit('effect', `${name} adds ${n} red mana.`, { seat: p.seat }); break; }
         case 'emblem': {
           if (fx.e === 'garruk') { const q = this.opps(p).sort((a, b) => b.life - a.life)[0]; if (q) { q.emblems = (q.emblems || []).concat('garruk'); } }
@@ -2586,17 +2600,18 @@
           break;
         }
         case 'osgir': {
-          const avail = this.availableMana(p);
-          const c = p.gy.filter((x) => x.info.types.has('Artifact') && x.info.mv <= avail && x.info.isPermanent).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0];
+          const zirda = this.statics(p, 'reduceAbilities').reduce((a, x) => a + x.s.n, 0);
+          const costOf = (x) => Math.max(x.info.mv ? 1 : 0, x.info.mv - zirda); // Zirda: abilities cost {2} less (not below one mana)
+          const avail = p.infMana === this.turn ? 99 : this.availableMana(p);
+          const c = p.gy.filter((x) => x.info.types.has('Artifact') && costOf(x) <= avail && x.info.isPermanent).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0];
           if (!c) break;
-          if (c.info.mv) this.pay(p, parseCost(String(c.info.mv)), 0, true);
+          if (costOf(c)) this.pay(p, parseCost(String(costOf(c))), 0, true);
           this.removeFrom(p.gy, c); c.zone = 'exile'; p.exile.push(c);
           for (let i = 0; i < 2 * this.tokenMult(p); i++) {
-            const t = this.makeToken(p, { sub: 'copy' }); t.info = c.info; t.name = c.info.name; t.ctrl = p.seat; p.bf.push(t);
-            if (t.info.isPW) t.loyalty = this.counterAmount(p, t.info.loyalty || 3, 'loyalty');
-            if (t.info.isCreature) this.creatureEntered(p, t);
-            if (t.info.etb.length) this.resolveEffects(p, t.info.etb, t, null, true);
+            const t = this.makeToken(p, { sub: 'copy' }); t.info = c.info; t.name = c.info.name; t.copiedFrom = null;
+            this.enterBattlefield(t, p, { quiet: true });
           }
+          this.checkState();
           this.emit('token', `Osgir exiles ${c.info.name} and makes two token copies of it.`, { seat: p.seat, cards: [c.id] });
           break;
         }
@@ -2967,7 +2982,7 @@
       return v;
     }
     chooseTutor(p, what) {
-      const pool = p.library.filter((c) => !c.info.isLand && (what === 'card' || (what === 'creature' && c.info.isCreature) || (what.includes('artifact') && c.info.types.has('Artifact')) || (what.includes('enchantment') && c.info.types.has('Enchantment')) || (what.includes('instant') && (c.info.isInstant || c.info.isSorcery))));
+      const pool = p.library.filter((c) => !c.info.isLand && (what === 'card' || (what === 'manaArtifact' && c.info.types.has('Artifact') && c.info.mana) || (what === 'creature' && c.info.isCreature) || (what.includes('artifact') && c.info.types.has('Artifact')) || (what.includes('enchantment') && c.info.types.has('Enchantment')) || (what.includes('instant') && (c.info.isInstant || c.info.isSorcery))));
       if (!pool.length) return null;
       for (const w of this.comboWants(p)) {
         const lib = w.missing.find((m) => m.zone === 'lib' && pool.some((c) => c.name === m.name));
@@ -3539,7 +3554,7 @@
         if (c.animatedUntilTurnOf === p.seat) { this.restoreInfo(c); c.animatedUntilTurnOf = null; }
       }
       // Unwinding Clock: untap artifacts during each other player's untap step
-      for (const q of this.opps(p)) if (this.has(q, 'unwinding')) for (const c of q.bf) if (c.info.types.has('Artifact') && !c.info.noUntap) c.tapped = false;
+      for (const q of this.opps(p)) if (this.has(q, 'unwinding')) for (const c of q.bf) if (c.info.types.has('Artifact')) c.tapped = false;
       for (const q of this.players) if (q.emblemShield && q.emblemShield === p.seat) q.emblemShield = null;
       for (const q of this.players) for (const c of q.bf) if (c.vraskaShield === p.seat) c.vraskaShield = null;
       this.emit('turn', `Turn ${this.round}: ${p.name}`, { seat: p.seat });
@@ -3795,7 +3810,8 @@
           case 'millPower': return postCombat && (this.has(p, 'muldrotha') || p.bf.some((x) => x.info.sidisi) || this.opps(p).some((q) => q.library.length <= 12));
           case 'revealUntil': return p.library.some((x) => x.info.types.has('Artifact') && x.info.mv >= 4);
           case 'noBlock': case 'tapBlocker': return !postCombat;
-          case 'millTop': return postCombat;
+          case 'millTop': case 'exileTop': return postCombat && p.library[0] && !(p.library[0].info.types.has('Artifact') || p.library[0].info.colors.size === 0);
+          case 'untapCreature': return p.bf.some((x) => x.info.isCreature && x.tapped && x.info.activated.some((a) => a.tap));
           default: return false;
         }
       });
@@ -3805,6 +3821,7 @@
     prepareAbility(p, c, ab, postCombat) {
       const elixir = this.has(p, 'elixir');
       if (c.zone !== 'bf') return null;
+      if (this.karnStops(p, c)) return null;
       const myrkulOut = p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'));
       // Cinderhaze Wretch with Myrkul: the discard loop is the point, so it goes before combat instead of attacking
       const loopNow = ab.untapWithCounter && (myrkulOut || !c.info.isCreature) && this.opps(p).some((q) => q.hand.length);
@@ -3901,6 +3918,12 @@
       if (ab.discard) this.discardWorst(p, ab.discard);
       if (ab.sac) { if (c.token) this.leaveBattlefield(c); else this.destroy(c, 'sacrificed', true); }
       this.resolveEffects(p, ab.fx, c, null, false);
+      // Rings of Brighthearth: pay {2} to copy an activated (non-mana) ability when it's worth it
+      if (!ab.untapWithCounter && p.bf.some((r) => r.info.statics.some((st) => st.k === 'rings')) && this.abilityScore(p, { c, ab, fodder: [], cost: ab.cost }) >= 6 && this.pay(p, parseCost('2'))) {
+        this.pay(p, parseCost('2'), 0, true);
+        this.emit('ability', `Rings of Brighthearth: ${p.name} pays {2} to copy ${c.info.name}'s ability.`, { seat: p.seat, cards: [c.id] });
+        this.resolveEffects(p, ab.fx, c, null, false);
+      }
       // Battlemage's Bracers copy
       if (c.info.isCreature && p.bf.some((e) => e.attached === c.id && e.info.bracers) && this.pay(p, parseCost('1'))) { this.pay(p, parseCost('1'), 0, true); this.resolveEffects(p, ab.fx, c, null, true); }
       // Cinderhaze Wretch: put a -1/-1 counter on it to untap and go again. Normally it stops before dying;

@@ -169,7 +169,7 @@ function check(cardName, label, setup, act, fxList) {
     if (ctx.leaves) { before.me.bf -= 1; before.me.creatures -= ctx.c && ctx.c.info.isCreature ? 1 : 0; before.me.nonland -= 1; }
     act(g, ctx);
     const after = snap(g);
-    const kinds = fxList.filter((f) => !f.ifBehind && !(f.k === 'discardSelf' && fxList.some((x) => x.k === 'tutor'))).map((f) => f.k).filter((k) => !CONDITIONAL.has(k));
+    const kinds = fxList.filter((f) => !f.ifBehind && !f.ifCommander && !(f.k === 'discardSelf' && fxList.some((x) => x.k === 'tutor'))).map((f) => f.k).filter((k) => !CONDITIONAL.has(k));
     const failed = kinds.filter((k) => EXPECT[k] ? !EXPECT[k](before, after) : before.any === after.any && JSON.stringify(before) === JSON.stringify(after));
     const missing = fxList.map((f) => f.k).filter((k) => !EXPECT[k]);
     results.push({ card: cardName, test: label, ok: failed.length === 0, failed, effects: fxList.map((f) => f.k), note: missing.length ? 'no specific expectation for ' + missing.join(', ') : '' });

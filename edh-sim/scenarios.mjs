@@ -434,4 +434,89 @@ export default [
       return { ok: c.zone === 'bf' && g.isType(c, 'Zombie'), note: `${c.zone}, zombie ${g.isType(c, 'Zombie')}` };
     },
   },
+  {
+    card: 'Basalt Monolith', title: 'with Forsaken Monument (or Zirda) it makes infinite colorless mana',
+    wrong: 'only the Rings of Brighthearth pairing was known',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Basalt Monolith'); put(g, me, 'Forsaken Monument');
+      return { ok: g.infiniteMana(me), note: '' };
+    },
+  },
+  {
+    card: 'Karn, the Great Creator', title: "opponents' artifacts can't activate abilities, mana included",
+    wrong: 'it only mattered alongside Mycosynth Lattice',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; put(g, me, 'Karn, the Great Creator'); const sr = put(g, opp, 'Sol Ring');
+      return { ok: !g.sources(opp).some((x) => x.c === sr), note: '' };
+    },
+  },
+  {
+    card: 'Ichor Wellspring', title: 'draws a card when it goes to the graveyard from the battlefield',
+    wrong: 'only the enters draw existed',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const iw = put(g, me, 'Ichor Wellspring'); const h0 = me.hand.length;
+      g.destroy(iw, 'sacrificed', true);
+      return { ok: me.hand.length === h0 + 1, note: `drew ${me.hand.length - h0}` };
+    },
+  },
+  {
+    card: "Ugin's Nexus", title: 'goes to exile instead of the graveyard and gives an extra turn',
+    wrong: 'it just went to the graveyard',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const n = put(g, me, "Ugin's Nexus");
+      g.destroy(n, 'destroyed', true);
+      return { ok: n.zone === 'exile' && me.extraTurn >= 1, note: `${n.zone}, extra turns ${me.extraTurn || 0}` };
+    },
+  },
+  {
+    card: 'Gamble', title: 'searches first, then discards at random (the found card can be lost)',
+    wrong: 'it discarded before searching, so the tutored card was always safe',
+    run({ table, put }) {
+      const g = table(); const c = put(g, g.players[0], 'Gamble');
+      return { ok: c.info.spell[0].k === 'tutor' && c.info.spell[1].k === 'discardSelf', note: c.info.spell.map((f) => f.k).join(',') };
+    },
+  },
+  {
+    card: 'Mystic Forge', title: 'its {T}, pay 1 life ability only exiles the top card',
+    wrong: 'the exiled card went to hand to be played',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const mf = put(g, me, 'Mystic Forge'); const top = me.library[0]; const h0 = me.hand.length;
+      g.resolveEffects(me, mf.info.activated[0].fx, mf, null, true);
+      return { ok: top.zone === 'exile' && me.hand.length === h0, note: top.zone };
+    },
+  },
+  {
+    card: "Jeska's Will", title: 'the exile-and-play mode needs you to control your commander',
+    wrong: 'both modes always happened',
+    run({ table, card }) {
+      const g = table(); const me = g.players[0]; const jw = card(g, me, "Jeska's Will", 'hand'); const ex0 = me.hand.length;
+      g.castSpell(me, jw, 'hand');
+      return { ok: me.hand.length === ex0 - 1, note: `hand ${ex0} -> ${me.hand.length}` };
+    },
+  },
+  {
+    card: 'Moonsilver Key', title: 'finds only an artifact with a mana ability (or a basic land)',
+    wrong: 'it could fetch any artifact, Blightsteel included',
+    run({ table }) {
+      const g = table(); const me = g.players[0]; const pick = g.chooseTutor(me, 'manaArtifact');
+      return { ok: !pick || !!pick.info.mana, note: pick ? pick.name : 'none' };
+    },
+  },
+  {
+    card: 'Aetherflux Reservoir', title: 'gains 1 life for each spell cast before it this turn',
+    wrong: 'it always gained 1',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const af = put(g, me, 'Aetherflux Reservoir'); me.spellsThisTurn = 4; const l0 = me.life;
+      g.resolveEffects(me, af.info.castTrig[0].fx, af, null, true);
+      return { ok: me.life === l0 + 4, note: `gained ${me.life - l0}` };
+    },
+  },
+  {
+    card: 'Alibou, Ancient Witness', title: 'gives OTHER artifact creatures haste, not itself',
+    wrong: 'it gave itself haste too',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const a = put(g, me, 'Alibou, Ancient Witness'); const w = put(g, me, 'Wurmcoil Engine');
+      return { ok: !g.hasKw(a, 'haste') && g.hasKw(w, 'haste'), note: `Alibou ${g.hasKw(a, 'haste')}, Wurmcoil ${g.hasKw(w, 'haste')}` };
+    },
+  },
 ];
