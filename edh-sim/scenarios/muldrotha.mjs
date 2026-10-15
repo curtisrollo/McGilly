@@ -163,4 +163,31 @@ export default [
       return { ok: me.hand.length <= 7 && draws <= 4, note: `hand ${me.hand.length}, Gitrog draws ${draws}` };
     },
   },
+  {
+    card: 'Muldrotha, the Gravetide', title: 'drill: recasts Sol Ring from the graveyard',
+    wrong: 'reported in a game: Sol Ring sat in the graveyard while Muldrotha had the mana',
+    run({ table, card }) {
+      const [g, me] = setup(table); const sr = card(g, me, 'Sol Ring', 'gy'); lands(g, me, 3);
+      g.mainPhase(me);
+      return { ok: sr.zone === 'bf', note: `Sol Ring in ${sr.zone}` };
+    },
+  },
+  {
+    card: 'Hermit Druid', title: "isn't used while an opponent's Valgavoth would exile everything it mills (and let them play it)",
+    wrong: 'reported in a game: Hermit Druid milled 24 cards straight into Valgavoth\'s exile',
+    run({ table, put }) {
+      const [g, me, opp] = setup(table); put(g, me, 'Hermit Druid'); put(g, opp, 'Valgavoth, Terror Eater');
+      const n0 = me.library.length; g.mainPhase(me); g.mainPhase(me, true);
+      return { ok: me.library.length >= n0 - 1 && !me.exile.length, note: `library ${n0} -> ${me.library.length}, exiled ${me.exile.length}` };
+    },
+  },
+  {
+    card: 'Dauthi Voidwalker', title: "exiles even its controller's own cards headed to an opponent's graveyard (no Valgavoth exception)",
+    wrong: "Dauthi was given Valgavoth's 'a card you didn't control' exception",
+    run({ table, put }) {
+      const [g, me, opp] = setup(table); put(g, me, 'Dauthi Voidwalker'); const c = put(g, opp, 'Sol Ring'); g.removeFrom(opp.bf, c); c.ctrl = me.seat; me.bf.push(c); // (a card of theirs we control)
+      g.destroy(c, 'destroyed', true);
+      return { ok: c.zone === 'exile', note: `Sol Ring in ${c.zone}` };
+    },
+  },
 ];
