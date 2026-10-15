@@ -426,6 +426,18 @@ scen('Cinderhaze Wretch', 'in a normal turn with Myrkul out it loops before comb
   g.mainPhase(me);
   return { ok: g.players.slice(1).every((q) => q.hand.length === 0), note: `opponents' hands: ${g.players.slice(1).map((q) => q.hand.length).join('/')}` };
 });
+scen('Astral Cornucopia', 'enters with X charge counters and Atraxa proliferates them', () => {
+  const g = table(); const [me] = g.players;
+  const ac = card(g, me, 'Astral Cornucopia', 'hand'); g.castSpell(me, ac, 'hand');
+  const x = ac.charge;
+  const at = put(g, me, "Atraxa, Praetors' Voice"); g.resolveEffect(me, { k: 'proliferate' }, at, 0, false);
+  return { ok: x >= 2 && ac.charge === x + 1, note: `entered with ${x}, after proliferate ${ac.charge}` };
+});
+scen('commander', 'a bounced commander goes to its owner\'s hand', () => {
+  const g = table(); const [me, opp] = g.players; const m = put(g, opp, 'Edgar Markov'); m.isCommander = true;
+  g.bounce(m);
+  return { ok: m.zone === 'hand' && opp.hand.includes(m), note: m.zone };
+});
 scen('combat', 'a big creature does not attack into an untapped deathtouch blocker', () => {
   const g = table(); const [me, opp] = g.players; const big = put(g, me, 'Craterhoof Behemoth');
   for (const q of g.players.slice(1)) put(g, q, 'Vampire Nighthawk');

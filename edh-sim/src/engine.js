@@ -1150,6 +1150,7 @@
           bf: p.bf.map((c) => {
             const [pw, tg] = c.info.isCreature ? this.pt(c) : [null, null];
             const o = { id: c.id, tp: c.tapped ? 1 : 0, p: pw, t: tg, l: c.info.isPW ? c.loyalty : null, ctr: c.p1, at: c.attached, sk: c.sick && c.info.isCreature ? 1 : 0, dm: c.dmg };
+            if (c.charge && !c.info.saga) o.ch = c.charge;
             if (c.baseInfo || c.transformed) { o.nm = c.copiedFrom ? `${c.name} (as ${c.info.name})` : c.info.name; o.cr = c.info.isCreature ? 1 : 0; o.tx = c.info.face ? c.info.face.oracle : c.info.text; o.ty = [...c.info.types].join(' ') + (c.info.subtypes && c.info.subtypes.length ? ' — ' + c.info.subtypes.join(' ') : '') + (c.copiedFrom && c.info.copy === null && !c.info.isLegendary && (this.cards[c.copiedFrom].info.isLegendary) ? ' (copy — not legendary)' : ''); }
             // a modal double-faced card played as its land face (Bala Ged Recovery → Bala Ged Sanctuary)
             if (c.info.isLand && this.metaSeen[c.id] && !this.metaSeen[c.id].land) { o.ld = 1; o.nm = c.info.name; }
@@ -1301,7 +1302,9 @@
       this.leaveBattlefield(c);
       this.dropAuras(c, ctrl, auras);
       if (c.token) return;
-      if (c.isCommander) { c.zone = 'command'; owner.command.push(c); return; }
+      // A commander headed to hand may go to the command zone instead; hand is better (casting it from hand
+      // adds no commander tax), so it goes to hand.
+      if (c.isCommander) this.emit('move', `${c.info.name} goes back to ${owner.name}'s hand (no commander tax to recast it from there).`, { seat: owner.seat, cards: [c.id] });
       c.zone = 'hand'; owner.hand.push(c);
     }
 
@@ -1819,8 +1822,9 @@
       if (c.info.etbCounters) c.p1 = this.counterAmount(p, c.info.etbCounters === 'X' ? (o.xVal || 0) : c.info.etbCounters);
       if (c.copyPlusOne && c.info.isCreature) c.p1 += this.counterAmount(p, 1);
       if (o.p1) c.p1 = (c.p1 || 0) + o.p1;
-      if (c.info.chargeX) c.charge = o.xVal || 0;
-      if (c.info.multikicker) c.charge = o.kicks || 0;
+      // charge counters it enters with count as counters being put on it (Doubling Season doubles them)
+      if (c.info.chargeX) c.charge = o.xVal ? this.counterAmount(p, o.xVal) : 0;
+      if (c.info.multikicker) c.charge = o.kicks ? this.counterAmount(p, o.kicks) : 0;
       if (c.info.converge) c.p1 = this.counterAmount(p, Math.min(o.colorsSpent || p.colors.length, 5));
       if (c.info.prepared) c.prepared = true;
       if (c.info.banner || c.info.cavern) c.chosenType = this.favouriteType(p);
@@ -2215,11 +2219,24 @@
           break;
         }
         case 'proliferate': {
-          let n = 0;
+          // proliferate: choose any permanents and players that have counters and give each one more of a kind it has.
+          // Ours: +1/+1, loyalty, charge. Theirs: -1/-1 counters on their creatures, poison on them.
           const pm = this.counterMult(p);
-          for (const c of p.bf) { if (c.p1 > 0) { c.p1 += pm; n++; } if (c.info.isPW) { c.loyalty += pm; n++; } }
-          for (const q of this.opps(p)) if (q.poison > 0) q.poison++;
-          if (n && !quiet) this.emit('effect', `${p.name} proliferates (${n} permanents).`, { seat: p.seat, cards: src ? [src.id] : [] });
+          const hit = [];
+          for (const c of p.bf) {
+            let any = false;
+            if (c.p1 > 0) { c.p1 += pm; any = true; }
+            if (c.info.isPW && c.loyalty > 0) { c.loyalty += pm; any = true; }
+            if (c.charge > 0 && !c.info.saga) { c.charge += pm; any = true; }
+            if (any) hit.push(c);
+          }
+          for (const q of this.opps(p)) {
+            for (const c of q.bf) if (c.info.isCreature && c.p1 < 0) { c.p1 -= 1; hit.push(c); }
+            if (q.poison > 0) q.poison++;
+          }
+          const pois = this.opps(p).filter((q) => q.poison > 0);
+          if ((hit.length || pois.length) && !quiet) this.emit('effect', `${p.name} proliferates: ${this.listNames(hit.map((c) => this.cname(c)), 8) || 'no permanents'}${pois.length ? `; poison on ${pois.map((q) => q.name).join(', ')}` : ''}.`, { seat: p.seat, cards: (src ? [src.id] : []).concat(hit.map((c) => c.id)) });
+          this.checkState();
           break;
         }
         case 'overrun': {
@@ -3641,6 +3658,7 @@
       const fx = c.info.isPermanent ? c.info.etb : c.info.spell;
       if (fx.some((f) => f.k === 'drain' || f.k === 'hailfire')) return 3;
       if (fx.some((f) => f.k === 'wipe')) return 2;
+      if (c.info.chargeX) return 2; // Astral Cornucopia for X=1 is 3 mana for 1
       return 1;
     }
 

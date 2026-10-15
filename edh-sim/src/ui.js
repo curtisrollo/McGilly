@@ -257,7 +257,7 @@
     const ty = m.types.replace(/^Legendary /, '').split(' — ')[0];
     return `<button type="button" class="${cls}" style="--frame:${frameColor(m.colors)}" data-card="${b.id}" title="${esc(m.name)}">
       <span class="n">${esc(m.name)}</span><span class="pic">${artSvg(m, b.id)}</span>${attachName ? `<span class="att">⚲ ${esc(attachName)}</span>` : ''}
-      <span class="ty">${esc(ty)}</span>${b.ctr ? `<span class="ctr">+${b.ctr}</span>` : ''}${pt}${fx && fx.label ? `<span class="fxl ${fx.tone}">${esc(fx.label)}</span>` : ''}</button>`;
+      <span class="ty">${esc(ty)}</span>${b.ctr ? `<span class="ctr ${b.ctr < 0 ? 'neg' : ''}" title="${b.ctr > 0 ? `${b.ctr} +1/+1 counters` : `${-b.ctr} -1/-1 counters`}">${b.ctr > 0 ? '+' + b.ctr : '−' + -b.ctr}</span>` : ''}${b.ch ? `<span class="chg" title="${b.ch} charge counters">⚡${b.ch}</span>` : ''}${pt}${fx && fx.label ? `<span class="fxl ${fx.tone}">${esc(fx.label)}</span>` : ''}</button>`;
   }
 
   function landChips(lands, focus) {
@@ -307,6 +307,7 @@
         if ((b.dm || 0) > (a.dm || 0)) { out.push(`−${b.dm - (a.dm || 0)}`); tone = 'down'; }
         if (b.l != null && a.l != null && b.l !== a.l) { out.push(`${b.l > a.l ? '+' : ''}${b.l - a.l}`); tone = b.l > a.l ? 'up' : 'down'; }
         if ((b.ctr || 0) > (a.ctr || 0) && !out.length) { out.push(`+${b.ctr - (a.ctr || 0)} counter`); tone = 'up'; }
+        if ((b.ch || 0) !== (a.ch || 0)) { out.push(`${(b.ch || 0) > (a.ch || 0) ? '+' : ''}${(b.ch || 0) - (a.ch || 0)} charge`); tone = (b.ch || 0) > (a.ch || 0) ? 'up' : 'down'; }
         const swapped = (b.nm || '') !== (a.nm || '');
         if (out.length || swapped) state.fx.set(id, { cls: swapped ? 'fx-morph' : tone === 'down' ? 'fx-hurt' : 'fx-buff', label: out.join(' '), tone });
         else if (focus.has(id) && ['removal', 'effect', 'trigger', 'ability', 'response'].includes(ev.kind)) state.fx.set(id, { cls: 'fx-touch' });
