@@ -593,7 +593,7 @@
     'Vindicate': (a, cover) => { a.spell = [{ k: 'removal', what: 'permanent' }]; cover(ALL); },
     'Angel of Despair': (a, cover) => { a.etb = [{ k: 'removal', what: 'permanent' }]; cover(ALL); },
     'Patron of the Vein': (a, cover) => { a.deathWatch = a.deathWatch.map((w) => ({ ...w, fx: [{ k: 'exileDead' }, ...w.fx] })); cover(ALL); },
-    'Arena Rector': (a, cover) => { a.dies = []; a.dies.push({ k: 'search', n: 1, what: 'planeswalker', dest: 'bf' }); cover(/dies/); },
+    'Arena Rector': (a, cover) => { a.dies = [{ k: 'rectorExile' }, { k: 'search', n: 1, what: 'planeswalker', dest: 'bf', needsRector: true }]; cover(/dies/); },
     'Ajani Steadfast': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'pump', p: 1, t: 1, kw: ['first strike', 'vigilance', 'lifelink'] }]; a.loyaltyAbs[1].fx = [{ k: 'counters', n: 1, on: 'each' }, { k: 'loyaltyEach', other: true }]; a.loyaltyAbs[2].fx = [{ k: 'emblem', e: 'damageCap1' }]; cover(ALL); },
     'Brokers Ascendancy': (a, cover) => { a.endstep = [{ each: false, fx: [{ k: 'counters', n: 1, on: 'each' }, { k: 'loyaltyEach' }] }]; cover(ALL); },
     'Alibou, Ancient Witness': (a, cover) => { a.statics.push({ k: 'artifactHaste' }); cover(/haste/); },
@@ -739,7 +739,7 @@
     'Nyxbloom Ancient': (a, cover) => { a.statics.push({ k: 'manaMult', n: 3 }); cover(ALL); },
     'Zendikar Resurgent': (a, cover) => { a.statics.push({ k: 'landManaPlus' }); cover(/tap a land/); },
     'Oath of Nissa': (a, cover) => { a.etb = [{ k: 'dig', n: 3, types: ['creature', 'land', 'planeswalker'] }]; cover(ALL); },
-    'Oath of Teferi': (a, cover) => { a.statics.push({ k: 'oathTeferi' }); a.etb = [{ k: 'flickerOwn' }]; cover(ALL); },
+    'Oath of Teferi': (a, cover) => { a.statics.push({ k: 'oathTeferi' }); a.etb = [{ k: 'oathFlicker' }]; cover(ALL); },
     'Oko, Thief of Crowns': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'food' }]; cover(ALL); },
     "Olivia's Wrath": (a, cover) => { a.spell = [{ k: 'wipe', what: 'tribalMinus', tribe: 'Vampire' }]; cover(ALL); },
     'Opalescence': (a, cover) => { a.statics.push({ k: 'opalescence' }); cover(ALL); },
@@ -786,12 +786,12 @@
     "Assassin's Trophy": (a, cover) => { a.spell = [{ k: 'removal', what: 'nonland', comp: 'land', destroyComp: true }]; cover(ALL); },
     'Sword of Feast and Famine': (a, cover) => { a.statics = a.statics.filter((x) => x.k !== 'equipBuff'); a.statics.push({ k: 'equipBuff', p: 2, t: 2, kw: ['protection'], protect: ['B', 'G'] }); a.combatDmg = [{ k: 'discard', n: 1 }, { k: 'untapLands' }]; a.equipCombat = true; cover(ALL); },
     'Sylvan Library': (a, cover) => { cover(ALL); },
-    'Tamiyo, Field Researcher': (a, cover) => { const t7 = a.loyaltyAbs.find((x) => x.delta === -7); if (t7) t7.fx = [{ k: 'draw', n: 3 }, { k: 'emblem', e: 'freeSpells' }]; a.loyaltyAbs[0].fx = [{ k: 'noop' }]; const m2 = a.loyaltyAbs.find((x) => x.delta === -2); if (m2) m2.fx = [{ k: 'freeze', n: 2 }]; cover(ALL); },
+    'Tamiyo, Field Researcher': (a, cover) => { const t7 = a.loyaltyAbs.find((x) => x.delta === -7); if (t7) t7.fx = [{ k: 'draw', n: 3 }, { k: 'emblem', e: 'freeSpells' }]; a.loyaltyAbs[0].fx = [{ k: 'tamiyoWatch' }]; const m2 = a.loyaltyAbs.find((x) => x.delta === -2); if (m2) m2.fx = [{ k: 'freeze', n: 2 }]; cover(ALL); },
     'Tamiyo, the Moon Sage': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'freeze', n: 1 }]; const m2 = a.loyaltyAbs.find((x) => x.delta === -2); if (m2) m2.fx = [{ k: 'drawTapped' }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -8); if (ult) ult.fx = [{ k: 'emblem', e: 'tamiyo' }]; cover(ALL); },
     'Tatyova, Benthic Druid': (a, cover) => { a.statics = a.statics.filter((x) => x.k !== 'misc'); a.landfall = [[{ k: 'gain', n: 1 }, { k: 'draw', n: 1 }]]; cover(ALL); },
     "Teferi's Protection": (a, cover) => { cover(ALL); },
     'Teferi, Hero of Dominaria': (a, cover) => { const t8 = a.loyaltyAbs.find((x) => x.delta === -8); if (t8) t8.fx = [{ k: 'emblem', e: 'teferi' }]; const m3 = a.loyaltyAbs.find((x) => x.delta === -3); if (m3) m3.fx = [{ k: 'removal', what: 'nonland', tuck: true }]; a.loyaltyAbs[0].fx = [{ k: 'draw', n: 1 }, { k: 'untapLandsN', n: 2 }]; cover(ALL); },
-    'Teferi, Master of Time': (a, cover) => { const m3 = a.loyaltyAbs.find((x) => x.delta === -3); if (m3) m3.fx = [{ k: 'phaseOut' }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -10); if (ult) ult.fx = [{ k: 'extraTurn' }, { k: 'extraTurn' }]; cover(ALL); },
+    'Teferi, Master of Time': (a, cover) => { a.anyTurnPW = true; const m3 = a.loyaltyAbs.find((x) => x.delta === -3); if (m3) m3.fx = [{ k: 'phaseOut' }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -10); if (ult) ult.fx = [{ k: 'extraTurn' }, { k: 'extraTurn' }]; cover(ALL); },
     'Teferi, Time Raveler': (a, cover) => { a.statics.push({ k: 'raveler' }); a.loyaltyAbs[0].fx = [{ k: 'noop' }]; const m3 = a.loyaltyAbs.find((x) => x.delta === -3); if (m3) m3.fx = [{ k: 'removal', what: 'nonlandNonPW', bounce: true }, { k: 'draw', n: 1 }]; cover(ALL); },
     'Temple of Triumph': (a, cover) => { a.etb = [{ k: 'scry', n: 1 }]; cover(ALL); },
     'Terror of the Peaks': (a, cover) => { a.wardLife = 3; cover(ALL); },
@@ -799,7 +799,7 @@
     'The Gitrog Monster': (a, cover) => { a.upkeep = [{ each: false, fx: [{ k: 'gitrogUpkeep' }], lose: 0 }]; cover(ALL); },
     'The Mind Stone': (a, cover) => { a.harness = { cost: '5 W', end: [{ k: 'flickerOwn' }] }; cover(ALL); },
     'The Soul Stone': (a, cover) => { a.harness = { cost: '6 B', exileCreature: true, upkeep: [{ k: 'reanimate', any: false }] }; a.statics = a.statics.filter((x) => x.k !== 'misc'); cover(ALL); },
-    'The Wandering Emperor': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'counters', n: 1, on: 'target' }, { k: 'pump', p: 0, t: 0, kw: ['first strike'] }]; const m2 = a.loyaltyAbs.find((x) => x.delta === -2); if (m2) m2.fx = [{ k: 'removal', what: 'tappedCreature', exile: true }, { k: 'gain', n: 2 }]; cover(ALL); },
+    'The Wandering Emperor': (a, cover) => { a.flashPW = true; a.loyaltyAbs[0].fx = [{ k: 'counters', n: 1, on: 'target' }, { k: 'pump', p: 0, t: 0, kw: ['first strike'] }]; const m2 = a.loyaltyAbs.find((x) => x.delta === -2); if (m2) m2.fx = [{ k: 'removal', what: 'tappedCreature', exile: true }, { k: 'gain', n: 2 }]; cover(ALL); },
     'Takenuma, Abandoned Mire': (a, cover) => { if (a.channel) a.channel.fx = [{ k: 'mill', n: 3 }, { k: 'regrowType', types: ['creature', 'planeswalker'] }]; cover(ALL); },
     'Thousand-Year Elixir': (a, cover) => { a.statics.push({ k: 'elixir' }); cover(ALL); },
     'Toxic Deluge': (a, cover) => { a.spell = [{ k: 'wipe', what: 'deluge' }]; cover(ALL); },
@@ -1249,6 +1249,7 @@
       // Valgavoth: "If a card you didn't control would be put into an opponent's graveyard, exile it instead"
       const voider = this.alive().find((q) => q !== owner && q.seat !== lastCtrl && this.has(q, 'voidExile'));
       if (voider) { c.zone = 'exile'; c.voidBy = voider.seat; owner.exile.push(c); return; }
+      if (!c.token && (owner.emblems || []).includes('tamiyo')) { c.zone = 'hand'; owner.hand.push(c); return; } // Tamiyo, the Moon Sage's emblem: it goes back to hand
       c.zone = 'gy'; owner.gy.push(c);
       if (c.info.isLand) { if (this._landBatch) this._landBatch.add(owner.seat); else for (const x of owner.bf) for (const t of x.info.triggers) if (t.k === 'landToGy') this.resolveEffects(owner, t.fx, x, null, false); }
     }
@@ -2164,7 +2165,8 @@
             artench: (c) => c.info.types.has('Artifact') || c.info.types.has('Enchantment'), planeswalker: (c) => c.info.isPW,
             nonlandNonPW: (c) => !c.info.isLand && !c.info.isPW, permanent: () => true, tappedCreature: (c) => c.info.isCreature && c.tapped, colored: (c) => !c.info.isLand && c.info.colors && c.info.colors.size > 0,
           }[fx.what] || ((c) => !c.info.isLand);
-          const tgt = src && src._target ? src._target : this.bestOppTarget(p, (c) => pred(c) && this.targetable(c, p));
+          const destroys = !fx.tuck && !fx.bounce && !fx.shrink && !fx.exile; // a destroy effect looks past indestructible permanents
+          const tgt = src && src._target ? src._target : this.bestOppTarget(p, (c) => pred(c) && this.targetable(c, p) && !(destroys && (this.hasKw(c, 'indestructible') || c.indestructibleEOT)));
           if (!tgt || tgt.zone !== 'bf') break;
           const owner = this.P(tgt.ctrl);
           if (this.tryProtect(owner, [tgt], p)) break;
@@ -2240,7 +2242,7 @@
         }
         case 'counter': break; // handled at cast time
         case 'tutor': {
-          this.searched(p);
+          this.searched(p); if (p.tutorTurn !== this.turn) { p.tutorTurn = this.turn; p.tutorN = 0; } p.tutorN++;
           const pick = this.chooseTutor(p, fx.what);
           if (pick && fx.top) {
             // "shuffle and put that card on top": it is drawn next, not put into hand
@@ -2313,7 +2315,7 @@
           }
           for (const q of this.opps(p)) {
             for (const c of q.bf) if (c.info.isCreature && c.p1 < 0) { c.p1 -= 1; hit.push(c); }
-            if (q.poison > 0) q.poison++;
+            if (q.poison > 0) q.poison += Math.floor((this.has(p, 'vorinclexHalf') ? 2 : 1) / (this.opps(p).some((o) => this.has(o, 'vorinclexHalf')) ? 2 : 1)); // Vorinclex: twice as many from you, half from its opponents
           }
           const pois = this.opps(p).filter((q) => q.poison > 0);
           if ((hit.length || pois.length) && !quiet) this.emit('effect', `${p.name} proliferates: ${this.listNames(hit.map((c) => this.cname(c)), 8) || 'no permanents'}${pois.length ? `; poison on ${pois.map((q) => q.name).join(', ')}` : ''}.`, { seat: p.seat, cards: (src ? [src.id] : []).concat(hit.map((c) => c.id)) });
@@ -2469,6 +2471,7 @@
           this.emit('reanimate', `${name}: ${p.name} returns ${got.length ? this.listNames(got.map((c) => c.info.name)) : 'nothing'}.`, { seat: p.seat, cards: got.map((c) => c.id) });
           break;
         }
+        case 'tamiyoWatch': { const cs = p.bf.filter((c) => c.info.isCreature).sort((a, b) => this.power(b) + (this.hasKw(b, 'flying') ? 3 : 0) - this.power(a) - (this.hasKw(a, 'flying') ? 3 : 0)).slice(0, 2); for (const c of cs) c.tamiyoBy = p.seat; break; } // Tamiyo, Field Researcher's +1 (see hitPlayer)
         case 'loseGame': { const q = this._combatDefender; if (q && !q.lost) { this.emit('combo', `${name} dealt combat damage to ${q.name}: they lose the game!`, { seat: p.seat, target: q.seat }); this.lose(q, `${name}`); this.checkState(); } break; }
         case 'drawTapped': { const n = Math.max(0, ...this.alive().map((q) => q.bf.filter((c) => c.info.isCreature && c.tapped).length)); if (n) { this.draw(p, n); this.emit('draw', `${name}: ${p.name} draws ${n} (tapped creatures).`, { seat: p.seat }); } break; }
         case 'regrowType': {
@@ -2551,7 +2554,7 @@
         case 'noBlock': { const t = this.bestOppTarget(p, (c) => c.info.isCreature && !c.tapped && this.targetable(c, p)); if (t) { t.noBlock = true; this.emit('effect', `${name}: ${t.info.name} can't block this turn.`, { seat: p.seat, cards: [t.id] }); } break; }
         case 'tapBlocker': { const t = this.bestOppTarget(p, (c) => c.info.isCreature && !c.tapped && this.targetable(c, p)); if (t) { t.tapped = true; this.emit('effect', `${name} taps ${t.info.name}.`, { seat: p.seat, cards: [t.id] }); } break; }
         case 'untapLands': { for (const c of p.bf) if (c.info.isLand) c.tapped = false; if (!quiet) this.emit('effect', `${name}: ${p.name} untaps all lands.`, { seat: p.seat }); break; }
-        case 'untapLandsN': { let n = fx.n; for (const c of p.bf) if (n > 0 && c.info.isLand && c.tapped) { c.tapped = false; n--; } break; }
+        case 'untapLandsN': p.endUntap = (p.endUntap || 0) + fx.n; break; // Teferi, Hero of Dominaria: at the beginning of the next end step (see endStepDelayed)
         case 'regrowLands': {
           const lands = p.gy.filter((c) => c.info.isLand).slice(0, fx.n);
           for (const c of lands) { this.removeFrom(p.gy, c); c.zone = 'hand'; p.hand.push(c); }
@@ -2732,6 +2735,15 @@
         case 'gitrogUpkeep': {
           const land = p.bf.filter((c) => c.info.isLand).sort((a, b) => this.landValue(p, a) - this.landValue(p, b))[0];
           if (land && p.bf.filter((c) => c.info.isLand).length > 3) this.destroy(land, 'sacrificed', true); else if (src) this.destroy(src, 'sacrificed', true);
+          break;
+        }
+        case 'oathFlicker': {
+          // Oath of Teferi: exile another permanent you control; it returns at the next end step. A worn-down planeswalker comes back with
+          // its full (doubled) loyalty; otherwise something with an enter trigger
+          const gain = (x) => (x.info.isPW ? this.counterAmount(p, x.info.loyalty || 3, 'loyalty') - x.loyalty - (x.usedTurn === this.turn ? 0 : 2) : x.info.etb.length && !x.info.isLand ? this.permValue(x) / 3 : -1);
+          const c = p.bf.filter((x) => x !== src && !x.token && !x.isCommander && !x.info.isLand).sort((a, b) => gain(b) - gain(a))[0];
+          if (!c || gain(c) <= 0) break;
+          this.exileCard(c); if (c.zone === 'exile') { (p.oathReturn = p.oathReturn || []).push(c); this.emit('effect', `${name} exiles ${c.info.name} until the end step.`, { seat: p.seat, cards: [c.id] }); }
           break;
         }
         case 'flickerOwn': {
@@ -3194,6 +3206,7 @@
         if (f.k === 'ramp') s += 28 - turnN * 2;
         if (f.k === 'draw') s += 6 + (f.n === 'X' ? 3 : f.n * 3) + (p.hand.length < 3 ? 8 : 0);
         if (f.k === 'wheel') s += p.hand.length < 3 ? 25 : -20;
+        if (f.k === 'tutor' && p.tutorTurn === this.turn && p.tutorN >= 2) return -1; // (a tutor coming back to hand, Tamiyo's emblem: two a turn is plenty)
         if (f.k === 'tutor' || f.k === 'tutorBF') s += 14;
         if (f.k === 'tokens') s += 6 + (f.n === 'X' ? 6 : f.n * 2);
         if (f.k === 'treasure') s += 4;
@@ -3314,7 +3327,12 @@
       const overload = i.overload && this.pay(p, i.overload);
       if (overload && this.opps(p).some((q) => this.playerThreat(q) > 20)) cost = i.overload;
       if (!this.pay(p, cost, xVal, true)) return false;
-      const colorsSpent = Math.min(i.mv || 0, new Set(((this.pendingMana && this.pendingMana.spent) || []).filter((x) => COLORS.includes(x))).size);
+      let colorsSpent = Math.min(i.mv || 0, new Set(((this.pendingMana && this.pendingMana.spent) || []).filter((x) => COLORS.includes(x))).size);
+      if (i.converge && this.pendingMana) { // converge: the payer picks the colours, so count the most different colours the sources used could have made
+        const opts = (this.pendingMana.sources || []).map((id) => this.cards[id]).filter((x) => x && x.info.mana).map((x) => x.info.mana.opts.flatMap((o) => o.colors).filter((k) => COLORS.includes(k)));
+        let best = 0; const go = (k, used) => { best = Math.max(best, used.size); if (k >= opts.length || best >= 5) return; for (const col of opts[k]) if (!used.has(col)) { used.add(col); go(k + 1, used); used.delete(col); } go(k + 1, used); };
+        go(0, new Set()); colorsSpent = Math.min(i.mv || 0, Math.max(colorsSpent, best));
+      }
       if (i.isCreature && this.pendingMana && this.pendingMana.sources.some((id) => this.cards[id] && this.cards[id].info.name === 'Hall of the Bandit Lord')) c.hallHaste = true;
       // paying can set things off (Mana Confluence's life loss into an Exquisite Blood loop) that end the game
       if (p.lost || this.over) return true;
@@ -3617,7 +3635,7 @@
       // Unwinding Clock: untap artifacts during each other player's untap step
       for (const q of this.opps(p)) if (this.has(q, 'unwinding')) for (const c of q.bf) if (c.info.types.has('Artifact')) c.tapped = false;
       for (const q of this.players) if (q.emblemShield && q.emblemShield === p.seat) q.emblemShield = null;
-      for (const q of this.players) for (const c of q.bf) if (c.vraskaShield === p.seat) c.vraskaShield = null;
+      for (const q of this.players) for (const c of q.bf) { if (c.vraskaShield === p.seat) c.vraskaShield = null; if (c.tamiyoBy === p.seat) c.tamiyoBy = null; }
       this.emit('turn', `Turn ${this.round}: ${p.name}`, { seat: p.seat });
       // upkeep
       this.phase = 'upkeep';
@@ -3692,6 +3710,9 @@
         this._thatPlayer = null;
       }
       for (const e of p.emblems || []) if (e === 'kraken') this.addToken(p, { p: 9, t: 9, sub: 'Kraken', colors: 'blue' }, 1, false);
+      this.endStepDelayed(p);
+      // Teferi, Master of Time: its controller also uses it on other players' turns (here, at instant speed in their end step)
+      for (const q of this.opps(p)) for (const c of [...q.bf]) if (c.info.anyTurnPW && c.zone === 'bf' && c.usedTurn !== this.turn && this.walkerOnce(q, c)) { c.usedTurn = this.turn; c.usedCount = 1; }
       for (const c of [...p.bf]) {
         if (c.harnessed && c.info.harness.end) this.resolveEffects(p, c.info.harness.end, c, null, false);
         if (c.info.chainVeil && !p.walkerUses && p.bf.some((x) => x.info.isPW)) this.loseLife(p, 2);
@@ -3714,6 +3735,24 @@
         if (c.animatedEOT) { c.animatedEOT = false; this.restoreInfo(c); }
       }
       this.checkState();
+    }
+
+    // The Wandering Emperor (flash): the defending player flashes her in mid-combat and exiles the best tapped attacker with her -2
+    flashEmperor(q, attackers) {
+      const e = q.hand.find((c) => c.info.flashPW);
+      const tgt = e && attackers.filter((a) => a.zone === 'bf' && a.tapped && a.info.isCreature && this.targetable(a, q)).sort((a, b) => this.creatureValue(b) - this.creatureValue(a))[0];
+      if (!tgt || q.lost || this.abolished(q) || !this.pay(q, this.costFor(q, e, 'hand')) || !this.castSpell(q, e, 'hand') || e.zone !== 'bf' || tgt.zone !== 'bf') return;
+      const ab = e.info.loyaltyAbs.find((x) => x.delta === -2), d = -2 + (this.has(q, 'carth') ? 1 : 0);
+      if (!ab || e.loyalty + d < 0) return;
+      e.loyalty += d; e.usedTurn = this.turn; e.usedCount = 1; e._target = tgt;
+      this.emit('ability', `${e.info.name} [-2]: ${ab.text.slice(0, 90)}`, { seat: q.seat, cards: [e.id, tgt.id] });
+      this.resolveEffects(q, ab.fx, e, null, false); e._target = null; this.checkState();
+    }
+
+    // "At the beginning of the next end step": Teferi, Hero of Dominaria's +1 untaps lands, Oath of Teferi returns what it exiled
+    endStepDelayed(p) {
+      if (p.endUntap) { let n = p.endUntap; p.endUntap = 0; for (const c of p.bf) if (n > 0 && c.info.isLand && c.tapped) { c.tapped = false; n--; } }
+      if (p.oathReturn && p.oathReturn.length) { for (const c of p.oathReturn) if (c.zone === 'exile') { this.removeFrom(this.P(c.owner).exile, c); this.enterBattlefield(c, this.P(c.owner)); this.emit('effect', `${c.info.name} returns to the battlefield (Oath of Teferi).`, { seat: c.owner, cards: [c.id] }); } p.oathReturn = []; }
     }
 
     blackMarket(p, c) {
@@ -3807,7 +3846,7 @@
     // Walking Ballista style: remove +1/+1 counters to ping
     pingers(p, second) {
       for (const c of p.bf.filter((x) => /Remove a \+1\/\+1 counter from CARDNAME: It deals 1 damage to any target/i.test(x.info.text || ''))) {
-        if (second && this.availableMana(p) >= 4 && /\{4\}: Put a \+1\/\+1 counter/i.test(c.info.text)) { while (this.pay(p, parseCost('4'))) { this.pay(p, parseCost('4'), 0, true); c.p1 += this.counterMult(p); } }
+        if (second && this.availableMana(p) >= 4 && /\{4\}: Put a \+1\/\+1 counter/i.test(c.info.text)) { while (this.pay(p, parseCost('4'))) { this.pay(p, parseCost('4'), 0, true); c.p1 += this.counterAmount(p, 1); } }
         const q = this.opps(p).find((o) => this.scaleDamage(p.seat, o.seat, c.p1) >= o.life && o.protectedUntil < this.turn);
         if (q) { const n = c.p1; c.p1 = 0; this.loseLife(q, this.scaleDamage(p.seat, q.seat, n), c); this.emit('damage', `${c.info.name} removes ${n} counters and pings ${q.name} to death.`, { seat: p.seat, cards: [c.id], target: q.seat }); this.checkState(); continue; }
         const t = this.bestOppTarget(p, (x) => x.info.isCreature && this.targetable(x, p) && this.toughness(x) - x.dmg <= Math.min(c.p1 - 1, 3) && this.creatureValue(x) >= 5);
@@ -4121,8 +4160,9 @@
       for (const c of p.bf) if (c.info.saga && c.sagaConstructs && !c.tapped && this.pay(p, parseCost('2'))) { this.pay(p, parseCost('2'), 0, true); c.tapped = true; this.addToken(p, { p: 0, t: 0, sub: 'Construct', colors: 'colorless' }, 1, false); }
       // Cycling extra lands
       for (const c of [...p.hand]) if (!p.lost && !this.over && c.info.cycling && p.hand.filter((x) => x.info.isLand).length > 2 && this.pay(p, c.info.cycling)) {
-        this.pay(p, c.info.cycling, 0, true); this.discardCard(p, c); this.draw(p, 1);
+        this.pay(p, c.info.cycling, 0, true); this.discardCard(p, c);
         this.emit('ability', `${p.name} cycles ${c.info.name}.`, { seat: p.seat, cards: [c.id] });
+        this.draw(p, 1); // (after the log line: drawing from an empty library can end the player)
       }
       // Food / Clue / Blood tokens
       for (const c of [...p.bf]) if (c.token && c.info.activated && c.info.activated.length && /Food|Clue|Blood/.test(c.info.name)) {
@@ -4174,9 +4214,16 @@
         let s = 0;
         for (const f of a.fx) {
           if (f.k === 'removal' || f.k === 'phaseOut' || f.k === 'freeze' || f.k === 'neutralize') s += this.bestOppTarget(p, (x) => (f.what === 'creature' || f.k === 'phaseOut' ? x.info.isCreature : !x.info.isLand) && this.targetable(x, p)) ? 9 : -5;
+          else if (f.k === 'wipe' && f.what === 'big') { const big = (q) => q.bf.filter((x) => x.info.isCreature && this.power(x) >= 4).reduce((s2, x) => s2 + this.creatureValue(x) / (x.isCommander ? 2 : 1), 0); const v = this.opps(p).reduce((s2, q) => s2 + big(q), 0) - 1.5 * big(p); s += v >= 12 ? 10 + v / 3 : -10; } // Elspeth's -3
           else if (f.k === 'wipe') s += this.scoreCast(p, { info: { ...c.info, spell: [f], etb: [], isPermanent: false, isPW: false, mana: null, isCreature: false } }, 'hand') > 0 ? 14 : -10;
           else if (f.k === 'darettiWeld') { const fod = p.bf.some((x) => x.info.types.has('Artifact') && !x.isCommander && this.permValue(x) < 5); const best = Math.max(0, ...p.gy.filter((x) => x.info.types.has('Artifact') && x.info.isPermanent).map((x) => this.cardValue(p, x))); s += fod && best >= 6 ? 6 + best : -10; }
+          else if (f.k === 'draw' && (f.n || 1) >= p.library.length) s -= 60; // drawing out the library loses the game
           else if (f.k === 'tokens') s += 5; else if (f.k === 'draw') s += 4; else if (f.k === 'drain') s += 4;
+          else if (f.k === 'drawTapped') s += 4.5 * Math.max(0, ...this.alive().map((q) => q.bf.filter((x) => x.info.isCreature && x.tapped).length)); // Tamiyo, the Moon Sage's -2
+          else if (f.k === 'counters' && f.on === 'each') s += 1.5 * p.bf.filter((x) => x.info.isCreature).length; // Ajani Steadfast's -2, with loyaltyEach below
+          else if (f.k === 'tamiyoWatch') s += 1 + 2 * Math.min(2, p.bf.filter((x) => x.info.isCreature && (this.hasKw(x, 'flying') || this.power(x) >= 3)).length);
+          else if (f.k === 'loyaltyEach') s += 3 * p.bf.filter((x) => x.info.isPW && (!f.other || x !== c)).length;
+          else if (f.k === 'emblem' && ['tamiyo', 'damageCap1', 'freeSpells', 'jaceCounter'].includes(f.e) && (p.emblems || []).includes(f.e)) s -= 20; // a second copy of these does nothing
           else if (f.k === 'emblem' || f.k === 'massReanimate' || f.k === 'exileLibrary' || f.k === 'mindslaver' || f.k === 'liliana9' || f.k === 'piles' || f.k === 'extraTurn') s += 15;
           else if (f.k === 'lifeBecomes') s += this.opps(p).some((q) => q.life > 25) ? 10 : -5;
           else if (f.k === 'edictAll') s += this.opps(p).reduce((s2, q) => s2 + q.bf.filter((x) => x.info.isCreature).length, 0) > p.bf.filter((x) => x.info.isCreature).length * 2 ? 8 : -6;
@@ -4424,8 +4471,17 @@
       }
       this.checkState();
       if (q.lost || this.over) { attackers.forEach((a) => (a.attacking = false)); return; }
+      this.flashEmperor(q, attackers);
       // blocks
       const blocks = this.declareBlocks(q, attackers.filter((a) => a.zone === 'bf' && !assign.get(a.id)), p);
+      // creatures left over step in front of attackers sent at a planeswalker: a block that survives, or a chump when the walker would die
+      for (const a of attackers.filter((x) => x.zone === 'bf' && assign.get(x.id) && !this.hasKw(x, 'menace')).sort((x, y) => this.power(y) - this.power(x))) {
+        const w = this.cards[assign.get(a.id)], [ap, at] = this.pt(a), ak = this.kws(a), busy = new Set([...blocks.values()].flat());
+        const able = q.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b) && !busy.has(b) && this.canBlock(b, a));
+        const lives = (b) => (this.pt(b)[1] > ap || this.hasKw(b, 'indestructible')) && !ak.has('deathtouch'), kills = (b) => (this.pt(b)[0] >= at || this.hasKw(b, 'deathtouch')) && !ak.has('indestructible');
+        const b = able.find((x) => kills(x) && lives(x)) || able.find(lives) || (ap >= w.loyalty && !ak.has('trample') ? able.filter((x) => !x.isCommander && this.creatureValue(x) < this.permValue(w)).sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0] : null);
+        if (b) blocks.set(a.id, [b]);
+      }
       const blkInfo = [...blocks.entries()].flatMap(([aid, bs]) => bs.map((b) => ({ id: b.id, blocks: aid })));
       if (blkInfo.length) this.emit('block', `${q.name} blocks: ${[...blocks.entries()].map(([aid, bs]) => `${bs.map((b) => this.cname(b)).join(' + ')} blocks ${this.cards[aid].info.name}`).join('; ')}.`, { seat: q.seat, cards: blkInfo.map((b) => b.id), attackers: atkInfo, blockers: blkInfo, target: q.seat });
       // Spore Frog style fogs when the hit would be big
@@ -4467,7 +4523,9 @@
               if (ak.has('lifelink')) lifelinkGain.push(dd);
               if (dmg <= 0) break;
             }
-            if (dmg > 0 && ak.has('trample')) this.hitPlayer(p, q, a, dmg, lifelinkGain, (n) => (dealtToPlayer += n));
+            const tw = assign.get(a.id) && this.cards[assign.get(a.id)];
+            if (dmg > 0 && ak.has('trample') && tw && tw.zone === 'bf') { const dd = this.scaleDamage(p.seat, q.seat, dmg); tw.loyalty -= dd; if (ak.has('lifelink')) lifelinkGain.push(dd); } // trample over a blocker goes on to the planeswalker
+            else if (dmg > 0 && ak.has('trample')) this.hitPlayer(p, q, a, dmg, lifelinkGain, (n) => (dealtToPlayer += n));
             else if (dmg > 0 && bs.length) { const dd = this.scaleDamage(p.seat, q.seat, dmg); bs[0].dmg += dd; if (ak.has('lifelink')) lifelinkGain.push(dd); }
           } else {
             if (a.info.masterOfCruelties && a.enteredAttacking !== this.turn) { if (q.life > 1 && q.protectedUntil < this.turn) { this.loseLife(q, q.life - 1, a); this.emit('combo', `Master of Cruelties goes unblocked: ${q.name}'s life total becomes 1!`, { seat: p.seat, cards: [a.id], target: q.seat }); } continue; }
@@ -4540,6 +4598,7 @@
       let n;
       if (this.hasKw(a, 'infect')) { q.poison += dmg; n = dmg; } else n = this.loseLife(q, dmg, a);
       tally(n);
+      if (a.tamiyoBy != null && !this.P(a.tamiyoBy).lost) { this.draw(this.P(a.tamiyoBy), 1); this.emit('draw', `Tamiyo, Field Researcher: ${this.P(a.tamiyoBy).name} draws (${a.info.name} hit).`, { seat: a.tamiyoBy, cards: [a.id] }); }
       const dealt = this.hasKw(a, 'infect') ? dmg : (n ? dmg : 0); // damage dealt; Bloodletter only doubles the life lost
       if (a.isCommander && dealt) q.cmdDmg[a.id] = (q.cmdDmg[a.id] || 0) + dealt;
       if (this.hasKw(a, 'lifelink')) ll.push(dealt);
