@@ -163,7 +163,7 @@
     // tutors
     if (/search your library for an? (card|creature card|artifact or enchantment card|artifact card|enchantment card|instant or sorcery card)[^.]*?(put (?:it|that card) into your hand|put that card on top|reveal it, put it into your hand|put it on top)/.test(l)) {
       const what = (l.match(/search your library for an? (card|creature card|artifact or enchantment card|artifact card|enchantment card|instant or sorcery card)/) || [])[1] || 'card';
-      fx.push({ k: 'tutor', what: what.replace(' card', '') });
+      fx.push({ k: 'tutor', what: what.replace(' card', ''), ...(/on top/.test(l) ? { top: true } : {}) });
     } else if (/search your library for (?:a|an) (?:green )?creature card with mana value x or less[^.]*?battlefield/.test(l) || /search your library for an? creature card[^.]*?put it onto the battlefield/.test(l)) {
       fx.push({ k: 'tutorBF' });
     }
@@ -238,7 +238,7 @@
       fx.push({ k: 'protect' });
     }
     if (/extra turn/.test(l) && /take an extra turn/.test(l)) fx.push({ k: 'extraTurn' });
-    if (/each opponent discards|target player discards|target opponent discards/.test(l)) fx.push({ k: 'discard', n: num((l.match(/discards (a|one|two|three) cards?/) || [])[1] || 1) });
+    if (/each opponent discards|target player discards|target opponent discards/.test(l)) fx.push({ k: 'discard', n: num((l.match(/discards (a|one|two|three) cards?/) || [])[1] || 1), ...(/target (player|opponent) discards/.test(l) ? { one: true } : {}), ...(/at random/.test(l) ? { random: true } : {}) });
 
     // --- broader patterns ---
     // "look at the top N cards ... you may reveal a X card ... put it into your hand"
@@ -264,7 +264,7 @@
     if ((m = l.match(/tap (?:up to (\w+) )?target (?:nonland )?(?:permanent|creature)s?\. (?:it|they) (?:doesn't|don't) untap/))) fx.push({ k: 'freeze', n: m[1] ? num(m[1]) : 1 });
     if (/put target nonland permanent into its owner's library/.test(l)) fx.push({ k: 'removal', what: 'nonland', tuck: true });
     if (/target creature (?:you don't control )?phases out/.test(l) && !/each creature/.test(l)) fx.push({ k: 'phaseOut' });
-    if (/exile each permanent with mana value x or less that's one or more colors/.test(l)) fx.push({ k: 'wipe', what: 'ugin' });
+    if (/exile each permanent with mana value x or less that's one or more colors/.test(l)) fx.push({ k: 'wipe', what: 'ugin', exile: true });
     if (/destroy all non-zombie creatures/.test(l)) fx.push({ k: 'wipe', what: 'creatures', spare: 'Zombie' });
     if ((m = l.match(/each non-(\w+) creature gets -x\/-x until end of turn, where x is the number of \w+ you control/))) fx.push({ k: 'wipe', what: 'tribalMinus', tribe: cap(m[1]) });
     if (/destroy each nonland permanent with mana value 2 or less/.test(l)) fx.push({ k: 'wipe', what: 'mv2' });
@@ -624,7 +624,7 @@
     'Chatterfang, Squirrel General': (a, cover) => { a.landwalk = 'Forest'; a.activated = [{ sacSquirrels: true, cost: parseCost('B'), fx: [{ k: 'squirrelKill' }], text: 'Sacrifice squirrels to shrink a creature.' }]; cover(ALL); },
     'Chromatic Lantern': (a, cover) => { a.lantern = true; cover(ALL); },
     'Chrome Mox': (a, cover) => { cover(ALL); },
-    'Cinderhaze Wretch': (a, cover) => { a.activated = [{ tap: true, cost: parseCost(''), fx: [{ k: 'discard', n: 1 }], text: 'Target player discards a card.', untapWithCounter: true }]; cover(ALL); },
+    'Cinderhaze Wretch': (a, cover) => { a.activated = [{ tap: true, cost: parseCost(''), fx: [{ k: 'discard', n: 1, one: true }], text: 'Target player discards a card.', untapWithCounter: true }]; cover(ALL); },
     'Devoted Druid': (a, cover) => { a.mana.opts = a.mana.opts.map((o) => ({ ...o, amount: 2 })); a.druid = true; cover(ALL); },
     'City of Brass': (a, cover) => { cover(ALL); },
     'Crucible of Worlds': (a, cover) => { a.statics.push({ k: 'crucible' }); cover(ALL); },
@@ -782,7 +782,7 @@
     'Thousand-Year Elixir': (a, cover) => { a.statics.push({ k: 'elixir' }); cover(ALL); },
     'Toxic Deluge': (a, cover) => { a.spell = [{ k: 'wipe', what: 'deluge' }]; cover(ALL); },
     "Ugin's Nexus": (a, cover) => { a.statics = a.statics.filter((x) => x.k !== 'misc'); a.statics.push({ k: 'nexus' }); cover(ALL); },
-    'Ugin, the Spirit Dragon': (a, cover) => { const u10 = a.loyaltyAbs.find((x) => x.delta === -10); if (u10) u10.fx = [{ k: 'gain', n: 7 }, { k: 'draw', n: 7 }, { k: 'putFromHand', n: 7 }]; const mx = a.loyaltyAbs.find((x) => x.delta === -99); if (mx) { mx.delta = -98; mx.fx = [{ k: 'wipe', what: 'ugin' }]; } cover(ALL); },
+    'Ugin, the Spirit Dragon': (a, cover) => { const u10 = a.loyaltyAbs.find((x) => x.delta === -10); if (u10) u10.fx = [{ k: 'gain', n: 7 }, { k: 'draw', n: 7 }, { k: 'putFromHand', n: 7 }]; const mx = a.loyaltyAbs.find((x) => x.delta === -99); if (mx) { mx.delta = -98; mx.fx = [{ k: 'wipe', what: 'ugin', exile: true }]; } cover(ALL); },
     'Unwinding Clock': (a, cover) => { a.statics.push({ k: 'unwinding' }); cover(ALL); },
     "Vanquisher's Banner": (a, cover) => { a.banner = true; cover(ALL); },
     'Vilis, Broker of Blood': (a, cover) => { cover(ALL); },
@@ -890,6 +890,13 @@
       const c = this.learned[p.deckId] && this.learned[p.deckId].cards[name];
       if (!c || c.n < 8) return 0;
       return c.pri * Math.min(1, c.n / 40);
+    }
+    // "A", "A and B", "A, B and 3 more" — groups identical names ("3× Vampire token 1/1")
+    listNames(names, max = 6) {
+      const counts = new Map(); for (const n of names) counts.set(n, (counts.get(n) || 0) + 1);
+      const parts = [...counts].map(([n, k]) => (k > 1 ? `${k}× ${n}` : n));
+      const shown = parts.slice(0, max); if (parts.length > max) shown.push(`${parts.length - max} more`);
+      return shown.length <= 1 ? shown.join('') : shown.slice(0, -1).join(', ') + ' and ' + shown[shown.length - 1];
     }
     ctxSrc() { return this._ctx[this._ctx.length - 1] || null; }
     // A rough single number for "how much did this card do": damage, cards, board, interaction, mana
@@ -1034,7 +1041,9 @@
           bf: p.bf.map((c) => {
             const [pw, tg] = c.info.isCreature ? this.pt(c) : [null, null];
             const o = { id: c.id, tp: c.tapped ? 1 : 0, p: pw, t: tg, l: c.info.isPW ? c.loyalty : null, ctr: c.p1, at: c.attached, sk: c.sick && c.info.isCreature ? 1 : 0, dm: c.dmg };
-            if (c.baseInfo || c.transformed) { o.nm = c.copiedFrom ? `${c.name} (as ${c.info.name})` : c.info.name; o.cr = c.info.isCreature ? 1 : 0; o.tx = c.info.face ? c.info.face.oracle : c.info.text; }
+            if (c.baseInfo || c.transformed) { o.nm = c.copiedFrom ? `${c.name} (as ${c.info.name})` : c.info.name; o.cr = c.info.isCreature ? 1 : 0; o.tx = c.info.face ? c.info.face.oracle : c.info.text; o.ty = [...c.info.types].join(' ') + (c.info.subtypes && c.info.subtypes.length ? ' — ' + c.info.subtypes.join(' ') : '') + (c.copiedFrom && c.info.copy === null && !c.info.isLegendary && (this.cards[c.copiedFrom].info.isLegendary) ? ' (copy — not legendary)' : ''); }
+            // a modal double-faced card played as its land face (Bala Ged Recovery → Bala Ged Sanctuary)
+            if (c.info.isLand && this.metaSeen[c.id] && !this.metaSeen[c.id].land) { o.ld = 1; o.nm = c.info.name; }
             return o;
           }),
         })),
@@ -1092,13 +1101,15 @@
       if (c.token) return;
       if (c.isCommander) { c.zone = 'command'; owner.command.push(c); this.emit('move', `${c.info.name} returns to the command zone.`, { seat: owner.seat, cards: [c.id] }); return; }
       if (fromBf && wasArtifact && (ctrl.emblems || []).includes('artifactRecursion')) { ctrl.delayedReturn = ctrl.delayedReturn || []; ctrl.delayedReturn.push(c); }
-      this.toGraveyard(c);
+      this.toGraveyard(c, ctrl.seat);
     }
     // Every card headed to a graveyard goes through here (replacement effects live here)
-    toGraveyard(c) {
+    // lastCtrl: who controlled the card just before (the caster of a spell, the controller of a permanent)
+    toGraveyard(c, lastCtrl = c.owner) {
       const owner = this.P(c.owner);
       if (c.info.shuffleBack) { c.zone = 'library'; owner.library.push(c); this.R.shuffle(owner.library); return; }
-      const voider = this.alive().find((q) => q !== owner && this.has(q, 'voidExile'));
+      // Valgavoth: "If a card you didn't control would be put into an opponent's graveyard, exile it instead"
+      const voider = this.alive().find((q) => q !== owner && q.seat !== lastCtrl && this.has(q, 'voidExile'));
       if (voider) { c.zone = 'exile'; c.voidBy = voider.seat; owner.exile.push(c); return; }
       c.zone = 'gy'; owner.gy.push(c);
       if (c.info.isLand) for (const x of owner.bf) for (const t of x.info.triggers) if (t.k === 'landToGy') this.resolveEffects(owner, t.fx, x, null, false);
@@ -1206,7 +1217,10 @@
         const info = Object.assign(Object.create(Object.getPrototypeOf(c.info)), c.info, { isCreature: false, types: new Set(['Enchantment']), name: c.info.name, power: undefined, toughness: undefined });
         const t = { id: this.nextId++, name: c.info.name, info, owner: ctrl.seat, ctrl: ctrl.seat, isCommander: false, token: true, tapped: false, sick: false, p1: 0, loyalty: 0, dmg: 0, dt: false, attached: null, eot: { p: 0, t: 0, kw: [] }, zone: 'bf', ench: true };
         this.cards[t.id] = t; ctrl.bf.push(t);
-        this.emit('trigger', `Myrkul turns ${c.info.name} into an enchantment token copy.`, { seat: ctrl.seat, cards: [t.id] });
+        this.emit('trigger', `Myrkul exiles ${c.info.name} and makes an enchantment token copy of it.`, { seat: ctrl.seat, cards: [t.id] });
+        // the copy "enters the battlefield", so its own enters abilities trigger again
+        if (info.etb && info.etb.length) this.resolveEffects(ctrl, info.etb, t, `${info.name} (enchantment copy) enters`, false);
+        if (info.types.has('Enchantment')) for (const src of [...ctrl.bf]) for (const fx of (src.info.constellation || [])) this.resolveEffects(ctrl, fx, src, `${src.info.name} (constellation)`, true);
       }
       // own dies triggers
       if (c.info.dies.length) this.resolveEffects(ctrl, c.info.dies, c, `${c.info.name} dies`);
@@ -1329,7 +1343,7 @@
       if (!best || (cp.optional && this.permValue(best) < 6)) return;
       const base = best.baseInfo || best.info;
       const keep = { copy: null, scripted: true };
-      if (cp.nonLegendary) keep.isLegendary = false;
+      if (cp.nonLegendary) { keep.isLegendary = false; keep.types = new Set([...base.types].filter((t) => t !== 'Legendary')); }
       if (cp.eot) keep.kw = new Set([...base.kw, 'haste']);
       this.setInfo(c, Object.assign({}, base, keep));
       c.copiedFrom = best.id;
@@ -1720,8 +1734,10 @@
           return;
         }
         if (eq.info.reanimAura) return;
-        const best = crs.sort((a, b) => this.creatureValue(b) - this.creatureValue(a))[0];
-        if (best) eq.attached = best.id;
+        // "when enchanted creature dies" auras go on the creature we are happiest to lose; others on the best one
+        const best = crs.sort((a, b) => (eq.info.enchDies ? 1 : -1) * (this.creatureValue(a) - this.creatureValue(b)))[0];
+        if (best) { eq.attached = best.id; this.emit('effect', `${eq.info.name} enchants ${best.info.name}${best.token ? ' token' : ''}.`, { seat: p.seat, cards: [eq.id, best.id] }); }
+        else { this.emit('effect', `${eq.info.name} has nothing to enchant and goes to the graveyard.`, { seat: p.seat, cards: [eq.id] }); this.moveToGraveyard(eq); }
         return;
       }
     }
@@ -1932,6 +1948,7 @@
         case 'pacify': break;
         case 'edictThat': {
           const q = this._thatPlayer; if (!q) break;
+          if (q !== p && this.has(q, 'sigarda')) { this.emit('effect', `${name}: Sigarda keeps ${q.name} from sacrificing.`, { seat: q.seat }); break; }
           const c = q.bf.filter((x) => x.info.isCreature).sort((a, b) => this.creatureValue(a) - this.creatureValue(b))[0];
           if (c) { this.destroy(c, 'sacrificed', true); this.emit('removal', `${name}: ${q.name} sacrifices ${c.info.name}.`, { seat: p.seat, cards: [c.id], target: q.seat }); }
           break;
@@ -1956,7 +1973,11 @@
         case 'tutor': {
           this.searched(p);
           const pick = this.chooseTutor(p, fx.what);
-          if (pick) { this.credit(src, 'tutored', 1); this.removeFrom(p.library, pick); pick.zone = 'hand'; p.hand.push(pick); this.R.shuffle(p.library); this.emit('tutor', `${p.name} tutors for ${pick.info.name}.`, { seat: p.seat, cards: [pick.id] }); }
+          if (pick && fx.top) {
+            // "shuffle and put that card on top": it is drawn next, not put into hand
+            this.credit(src, 'tutored', 1); this.removeFrom(p.library, pick); this.R.shuffle(p.library); p.library.unshift(pick);
+            this.emit('tutor', `${p.name} searches for ${pick.info.name} and puts it on top of their library.`, { seat: p.seat, cards: [pick.id] });
+          } else if (pick) { this.credit(src, 'tutored', 1); this.removeFrom(p.library, pick); pick.zone = 'hand'; p.hand.push(pick); this.R.shuffle(p.library); this.emit('tutor', `${p.name} tutors for ${pick.info.name}.`, { seat: p.seat, cards: [pick.id] }); }
           break;
         }
         case 'tutorBF': {
@@ -2024,9 +2045,20 @@
         }
         case 'protect': break;
         case 'discard': {
-          const targets = this._combatDefender && src && (src.info.combatDmg || []).includes(fx) ? [this._combatDefender] : this.opps(p);
-          for (const q of targets) for (let i = 0; i < (fx.n || 1) && q.hand.length; i++) { const d = q.hand[this.R.int(q.hand.length)]; this.discardCard(q, d); }
-          if (!quiet) this.emit('effect', `${name}: ${targets.map((q) => q.name).join(', ')} discard${targets.length === 1 ? 's' : ''}.`, { seat: p.seat });
+          // "target player discards" hits one player (the opponent with the most cards); "each opponent" hits all.
+          // The discarding player chooses, unless it says "at random".
+          let targets = this._combatDefender && src && (src.info.combatDmg || []).includes(fx) ? [this._combatDefender] : this.opps(p);
+          if (fx.one && targets.length > 1) targets = [targets.filter((q) => q.hand.length).sort((a, b) => b.hand.length - a.hand.length || this.playerThreat(b) - this.playerThreat(a))[0] || targets[0]];
+          const parts = [];
+          for (const q of targets) {
+            const gone = [];
+            for (let i = 0; i < (fx.n || 1) && q.hand.length; i++) {
+              if (fx.random) { const d = q.hand[this.R.int(q.hand.length)]; this.discardCard(q, d); gone.push(d); }
+              else { const before = q.hand.slice(); this.discardWorst(q, 1); gone.push(...before.filter((x) => !q.hand.includes(x))); }
+            }
+            parts.push(gone.length ? `${q.name} discards ${gone.map((c) => c.info.name).join(' and ')}` : `${q.name} has no cards`);
+          }
+          if (!quiet || fx.one) this.emit('effect', `${name}: ${parts.join('; ')}.`, { seat: p.seat, target: targets.length === 1 ? targets[0].seat : null });
           break;
         }
         case 'extraTurn': p.extraTurn = (p.extraTurn || 0) + 1; this.emit('effect', `${p.name} will take an extra turn.`, { seat: p.seat }); break;
@@ -2096,13 +2128,17 @@
           break;
         }
         case 'edictAll': {
+          const parts = [], hit = [];
           for (const q of this.alive()) {
-            if (this.has(q, 'sigarda') && q !== p) continue;
+            if (this.has(q, 'sigarda') && q !== p) { parts.push(`${q.name} is protected by Sigarda`); continue; }
             const pool = q.bf.filter((x) => x.info.isCreature || (fx.pw && x.info.isPW)).sort((a, b) => this.permValue(a) - this.permValue(b));
-            if (!pool.length && fx.discardIfNone) { this.discardWorst(q, 1); continue; }
-            for (const c of pool.slice(0, fx.n)) this.destroy(c, 'sacrificed', true);
+            if (!pool.length && fx.discardIfNone) { const before = q.hand.slice(); this.discardWorst(q, 1); const d = before.find((x) => !q.hand.includes(x)); parts.push(d ? `${q.name} has none and discards ${d.info.name}` : `${q.name} has nothing`); continue; }
+            const victims = pool.slice(0, fx.n);
+            if (!victims.length) { parts.push(`${q.name} has nothing to sacrifice`); continue; }
+            parts.push(`${q.name} sacrifices ${victims.map((c) => c.info.name + (c.token ? ' (token)' : '')).join(' and ')}`); hit.push(...victims);
+            for (const c of victims) this.destroy(c, 'sacrificed', true);
           }
-          this.emit('removal', `${name}: each player sacrifices ${fx.n > 1 ? fx.n + ' creatures' : 'a creature'}.`, { seat: p.seat, cards: src ? [src.id] : [] });
+          this.emit('removal', `${name}: ${parts.join('; ')}.`, { seat: p.seat, cards: (src ? [src.id] : []).concat(hit.map((c) => c.id)) });
           break;
         }
         case 'discardAll': for (const q of this.alive()) this.discardWorst(q, 1); if (!quiet) this.emit('effect', `${name}: each player discards a card.`, { seat: p.seat }); break;
@@ -2422,7 +2458,7 @@
         case 'extraCombat': if (p.extraCombatTurn !== this.turn) this._extraCombat = fx; break;
         case 'hermit': {
           const milled = [];
-          while (p.library.length) { const c = p.library.shift(); if (c.info.isLand && c.info.types.has('Basic')) { c.zone = 'hand'; p.hand.push(c); break; } c.zone = 'gy'; p.gy.push(c); milled.push(c); }
+          while (p.library.length) { const c = p.library.shift(); if (c.info.isLand && c.info.types.has('Basic')) { c.zone = 'hand'; p.hand.push(c); break; } this.toGraveyard(c); milled.push(c); }
           this.emit('effect', `${name} mills ${milled.length} cards into ${p.name}'s graveyard.`, { seat: p.seat, cards: src ? [src.id] : [] });
           break;
         }
@@ -2535,6 +2571,9 @@
       const k = this.kws(c);
       if (k.has('hexproof') || k.has('shroud')) return false;
       if (this.P(c.ctrl).protectedUntil >= this.turn) return false;
+      // Serra's Emissary (creature): protection from creatures stops abilities of creatures targeting it
+      const src = this.ctxSrc();
+      if (k.has('emissary') && src && src.info.isCreature) return false;
       return true;
     }
 
@@ -2785,6 +2824,11 @@
       s += this.learnedPri(p, c.name) * 14;
       if (this.completesCombo(p, c)) s += 60;
       else if (this.comboWants(p).some((w) => w.missing.some((m) => m.name === c.name))) s += 15;
+      // an Aura needs something to enchant (Pattern of Rebirth with no creature of ours is not castable)
+      if (i.isAura && !i.reanimAura && !i.ghostform) {
+        if (i.statics.some((x) => x.k === 'pacify')) { if (!this.bestOppTarget(p, (x) => x.info.isCreature && this.targetable(x, p))) return -1; }
+        else if (!p.bf.some((x) => x.info.isCreature)) return -1;
+      }
       if (i.reanimAura && !this.alive().some((q) => q.gy.some((x) => x.info.isCreature && !x.isCommander))) return -1;
       if (i.isEquipment && !p.bf.some((x) => x.info.isCreature)) s -= 4;
       return s;
@@ -2839,7 +2883,7 @@
       const cavern = i.isCreature && p.bf.some((x) => x.info.cavern && x.chosenType && this.isType(c, x.chosenType));
       if (countered || (!i.uncounterable && !cavern && this.tryCounter(p, c))) {
         if (c.isCommander) { c.zone = 'command'; p.command.push(c); }
-        else this.toGraveyard(c);
+        else this.toGraveyard(c, p.seat);
         return true;
       }
       if (i.isPermanent) {
@@ -2849,7 +2893,7 @@
       } else {
         const fx = overload ? i.spell.filter((f) => f.k !== 'removal').concat(cost === i.overload ? [{ k: 'massBounce' }] : i.spell.filter((f) => f.k === 'removal')) : i.spell;
         this.resolveEffects(p, fx, c, null, false, xVal);
-        if (c.zone === 'stack') { if (c.flashedBack || /exile .* protection/i.test(i.text)) { c.zone = 'exile'; p.exile.push(c); c.flashedBack = false; } else this.toGraveyard(c); }
+        if (c.zone === 'stack') { if (c.flashedBack || /exile .* protection/i.test(i.text)) { c.zone = 'exile'; this.P(c.owner).exile.push(c); c.flashedBack = false; } else this.toGraveyard(c, p.seat); }
       }
       this.checkState();
       this.checkCombos(p);
@@ -3227,6 +3271,11 @@
       let guard = 0;
       while (guard++ < 40 && !p.lost && !this.over) {
         const options = this.castOptions(p);
+        // a strong activated ability (Osgir copying Wurmcoil, Razaketh tutoring) can beat casting a spell
+        const used = this._usedAbilities && this._usedAbilities.turn === this.turn ? this._usedAbilities.set : new Set();
+        this._usedAbilities = { turn: this.turn, set: used };
+        const ab = this.abilityOptions(p, second, used)[0];
+        if (ab && (!options.length || ab.s > options[0].s)) { used.add(ab.key); this.doActivate(p, ab); continue; }
         if (!options.length) break;
         options.sort((a, b) => b.s - a.s);
         const o = options[0];
@@ -3319,63 +3368,162 @@
       });
     }
 
-    activateAbilities(p, postCombat) {
-      if (this.over || p.lost) return;
+    // Can this ability be activated now, and what would it cost (mana, fodder)? null when not.
+    prepareAbility(p, c, ab, postCombat) {
       const elixir = this.has(p, 'elixir');
-      for (const c of [...p.bf]) {
-        if (c.zone !== 'bf') continue;
-        for (const ab of c.info.activated) {
-          if (ab.tap && (c.tapped || (c.info.isCreature && c.sick && !this.hasKw(c, 'haste') && !elixir))) continue;
-          if (ab.tap && c.info.isCreature && !postCombat && !ab.preCombat && this.canAttack(c)) continue; // creatures prefer to attack first
-          if (ab.sorcery && postCombat === undefined) continue;
-          if (ab.life && p.life - ab.life < 15) continue;
-          if (ab.sacOther && !ab.sacArtifact && !ab.sacCreature && !ab.sacArtifactN) continue;
-          if (ab.discard && p.hand.length < ab.discard + 1) continue;
-          if ((ab.sacCreature || ab.discard) && !ab.fx.some((f) => ['draw', 'tutor', 'damage', 'removal', 'search', 'drain', 'tokens'].includes(f.k))) continue;
-          if (c.info.sacOutlet && ab.fx.every((f) => f.k === 'counters' || f.k === 'tutor')) continue; // used by the aristocrats logic
-          if (!this.abilityUseful(p, ab, c, postCombat)) continue;
-          // non-mana costs
-          let fodder = [];
-          if (ab.sacArtifact) {
-            fodder = p.bf.filter((x) => x !== c && x.info.types.has('Artifact') && !x.isCommander).sort((a, b) => this.permValue(a) - this.permValue(b)).slice(0, ab.sacArtifact);
-            if (fodder.length < ab.sacArtifact || fodder.some((x) => this.permValue(x) > 8)) continue;
-          }
-          if (ab.sacCreature) {
-            fodder = p.bf.filter((x) => x !== c && x.info.isCreature && !x.isCommander && (x.token || this.creatureValue(x) < 5)).sort((a, b) => this.creatureValue(a) - this.creatureValue(b)).slice(0, ab.sacCreature);
-            if (fodder.length < ab.sacCreature) continue;
-          }
-          if (ab.sacArtifactN && !ab.sacArtifact) {
-            fodder = p.bf.filter((x) => x !== c && x.info.types.has('Artifact') && !x.isCommander && (x.token || this.permValue(x) < 4)).sort((a, b) => this.permValue(a) - this.permValue(b)).slice(0, ab.sacArtifactN);
-            if (fodder.length < ab.sacArtifactN) continue;
-          }
-          if (ab.sacNonland) {
-            fodder = p.bf.filter((x) => x !== c && !x.info.isLand && !x.isCommander).sort((a, b) => this.permValue(a) - this.permValue(b)).slice(0, ab.sacNonland);
-            if (fodder.length < ab.sacNonland || !this.opps(p).some((q) => q.life <= 10)) continue;
-          }
-          let cost = ab.cost;
-          if (ab.tribeDiscount) cost = { ...cost, generic: Math.max(0, cost.generic - p.bf.filter((x) => x.info.isCreature && this.isType(x, ab.tribeDiscount)).length) };
-          const zirda = this.statics(p, 'reduceAbilities').reduce((s2, x) => s2 + x.s.n, 0);
-          if (zirda && cost.mv) cost = { ...cost, generic: Math.max(cost.mv - cost.generic >= 1 ? 0 : 1, cost.generic - zirda) };
-          if (cost.mv && !this.pay(p, cost)) continue;
-          if (cost.mv) this.pay(p, cost, 0, true);
-          if (ab.tap) c.tapped = true;
-          if (ab.life) this.loseLife(p, ab.life);
-          this._sacMv = fodder.length ? Math.max(...fodder.map((x) => x.info.mv)) : null;
-          for (const f of fodder) this.destroy(f, 'sacrificed', true);
-          if (ab.discard) this.discardWorst(p, ab.discard);
-          this.emit('ability', `${p.name} activates ${c.info.name}: ${ab.text.slice(0, 90)}`, { seat: p.seat, cards: [c.id] });
-          if (ab.sac) this.moveToGraveyard(c);
-          this.resolveEffects(p, ab.fx, c, null, false);
-          // Battlemage's Bracers copy
-          if (c.info.isCreature && p.bf.some((e) => e.attached === c.id && e.info.bracers) && this.pay(p, parseCost('1'))) { this.pay(p, parseCost('1'), 0, true); this.resolveEffects(p, ab.fx, c, null, true); }
-          // Cinderhaze Wretch: untap with a -1/-1 counter and go again
-          if (ab.untapWithCounter && this.toughness(c) > 1) { c.p1 -= 1; c.tapped = false; this.resolveEffects(p, ab.fx, c, null, true); c.tapped = true; }
-          this._sacMv = null;
-          this.checkState();
-          if (c.zone !== 'bf') break;
+      if (c.zone !== 'bf') return null;
+      if (ab.tap && (c.tapped || (c.info.isCreature && c.sick && !this.hasKw(c, 'haste') && !elixir))) return null;
+      if (ab.tap && c.info.isCreature && !postCombat && !ab.preCombat && !this.hasKw(c, 'vigilance') && this.canAttack(c) && !ab.fx.some((f) => f.k === 'osgir')) return null; // creatures prefer to attack first
+      if (ab.sorcery && postCombat === undefined) return null;
+      if (ab.life && p.life - ab.life < 15) return null;
+      if (ab.sacOther && !ab.sacArtifact && !ab.sacCreature && !ab.sacArtifactN) return null;
+      if (ab.discard && p.hand.length < ab.discard + 1) return null;
+      if ((ab.sacCreature || ab.discard) && !ab.fx.some((f) => ['draw', 'tutor', 'damage', 'removal', 'search', 'drain', 'tokens'].includes(f.k))) return null;
+      if (!this.abilityUseful(p, ab, c, postCombat)) return null;
+      let fodder = [];
+      if (ab.sacArtifact) {
+        fodder = p.bf.filter((x) => x !== c && x.info.types.has('Artifact') && !x.isCommander).sort((a, b) => this.permValue(a) - this.permValue(b)).slice(0, ab.sacArtifact);
+        if (fodder.length < ab.sacArtifact || fodder.some((x) => this.permValue(x) > 8)) return null;
+      }
+      if (ab.sacCreature) {
+        fodder = this.sacFodder(p, c).slice(0, ab.sacCreature);
+        if (fodder.length < ab.sacCreature) return null;
+      }
+      if (ab.sacArtifactN && !ab.sacArtifact) {
+        fodder = p.bf.filter((x) => x !== c && x.info.types.has('Artifact') && !x.isCommander && (x.token || this.permValue(x) < 4)).sort((a, b) => this.permValue(a) - this.permValue(b)).slice(0, ab.sacArtifactN);
+        if (fodder.length < ab.sacArtifactN) return null;
+      }
+      if (ab.sacNonland) {
+        fodder = p.bf.filter((x) => x !== c && !x.info.isLand && !x.isCommander).sort((a, b) => this.permValue(a) - this.permValue(b)).slice(0, ab.sacNonland);
+        if (fodder.length < ab.sacNonland || !this.opps(p).some((q) => q.life <= 10)) return null;
+      }
+      let cost = ab.cost;
+      if (ab.tribeDiscount) cost = { ...cost, generic: Math.max(0, cost.generic - p.bf.filter((x) => x.info.isCreature && this.isType(x, ab.tribeDiscount)).length) };
+      const zirda = this.statics(p, 'reduceAbilities').reduce((s2, x) => s2 + x.s.n, 0);
+      if (zirda && cost.mv) cost = { ...cost, generic: Math.max(cost.mv - cost.generic >= 1 ? 0 : 1, cost.generic - zirda) };
+      if (cost.mv && !this.pay(p, cost)) return null;
+      return { c, ab, fodder, cost };
+    }
+    // Creatures we are happy to sacrifice, cheapest first. With Myrkul out, nontoken creatures with
+    // enters/static abilities come back as enchantment copies, so they are good fodder too.
+    sacFodder(p, outlet) {
+      const myrkul = p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'));
+      return p.bf.filter((x) => x !== outlet && x.info.isCreature && !x.isCommander && (x.token || this.creatureValue(x) < 5 || (myrkul && this.myrkulGain(x) > 0)))
+        .sort((a, b) => (this.creatureValue(a) - (myrkul ? this.myrkulGain(a) * 2 : 0)) - (this.creatureValue(b) - (myrkul ? this.myrkulGain(b) * 2 : 0)));
+    }
+    // What a creature is worth as a Myrkul enchantment copy: its enters trigger again plus the abilities it keeps
+    myrkulGain(c) {
+      if (c.token || c.isCommander) return 0;
+      const i = c.info;
+      let g = 0;
+      if (i.etb.length) g += 4 + i.etb.length * 2;
+      if (i.statics.length) g += 3;
+      if (i.triggers.length || i.deathWatch.length || i.upkeep.length || i.endstep.length || i.castTrig.length) g += 3;
+      if (i.activated.length) g += 2;
+      if (i.dies.length) g += 3; // it also dies, so dies triggers happen
+      return g - Math.max(0, (this.power(c) - 3)) * 0.5;
+    }
+    // How good is activating this ability right now (for ordering abilities and comparing with spells)
+    abilityScore(p, prep) {
+      const { c, ab, fodder, cost } = prep;
+      let s = 0;
+      for (const f of ab.fx) {
+        if (f.k === 'tutor') { const pick = this.chooseTutor(p, f.what || 'card'); s += pick ? 12 + Math.min(25, this.cardValue(p, pick)) + (this.completesCombo(p, pick) ? 40 : 0) : -20; }
+        else if (f.k === 'osgir') { const avail = this.availableMana(p); const best = p.gy.filter((x) => x.info.types.has('Artifact') && x.info.isPermanent && x.info.mv <= avail).sort((a, b) => this.permValue(b) - this.permValue(a))[0]; s += best ? 10 + this.permValue({ ...best, p1: 0, dmg: 0, eot: { p: 0, t: 0, kw: [] }, ctrl: p.seat, zone: 'bf' }) * 2 : -20; }
+        else if (f.k === 'draw') s += 5 + (f.n || 1) * 3;
+        else if (f.k === 'removal' || f.k === 'steal') s += 12;
+        else if (f.k === 'tokens') s += 5 + (f.n || 1) * 2;
+        else if (f.k === 'damage' || f.k === 'drain' || f.k === 'drainOne') s += 5;
+        else if (f.k === 'discard') s += 4;
+        else if (f.k === 'cheatCreature') s += 20;
+        else if (f.k === 'feldon' || f.k === 'reanimateArtifact' || f.k === 'weld') s += 14;
+        else s += 3;
+      }
+      const myrkul = p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'));
+      for (const x of fodder) s -= x.token ? 1 : Math.max(0, this.creatureValue(x) * 0.6 - (myrkul ? this.myrkulGain(x) : 0));
+      s -= (ab.life || 0) * 0.4 + (cost.mv || 0) * 0.5;
+      return s;
+    }
+    doActivate(p, prep) {
+      const { c, ab, fodder, cost } = prep;
+      if (cost.mv) this.pay(p, cost, 0, true);
+      if (ab.tap) c.tapped = true;
+      if (ab.life) this.loseLife(p, ab.life);
+      this._sacMv = fodder.length ? Math.max(...fodder.map((x) => x.info.mv)) : null;
+      const costTxt = [ab.life ? `pays ${ab.life} life` : '', fodder.length ? `sacrifices ${fodder.map((x) => x.info.name + (x.token ? ' token' : '')).join(' and ')}` : ''].filter(Boolean).join(', ');
+      this.emit('ability', `${p.name} activates ${c.info.name}${costTxt ? ` (${costTxt})` : ''}: ${ab.text.slice(0, 90)}`, { seat: p.seat, cards: [c.id].concat(fodder.map((x) => x.id)) });
+      for (const f of fodder) this.destroy(f, 'sacrificed', true);
+      if (ab.discard) this.discardWorst(p, ab.discard);
+      if (ab.sac) this.moveToGraveyard(c);
+      this.resolveEffects(p, ab.fx, c, null, false);
+      // Battlemage's Bracers copy
+      if (c.info.isCreature && p.bf.some((e) => e.attached === c.id && e.info.bracers) && this.pay(p, parseCost('1'))) { this.pay(p, parseCost('1'), 0, true); this.resolveEffects(p, ab.fx, c, null, true); }
+      // Cinderhaze Wretch: put a -1/-1 counter on it to untap and go again. Normally it stops before dying;
+      // with Myrkul out it keeps going until it dies and comes back as an enchantment, which can untap for free forever.
+      if (ab.untapWithCounter) {
+        const myrkul = () => p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'));
+        for (let n = 0; n < 40 && c.zone === 'bf' && this.opps(p).some((q) => q.hand.length); n++) {
+          if (c.info.isCreature) {
+            if (this.toughness(c) <= 1 && !myrkul()) break;
+            c.p1 -= 1; c.tapped = false;
+            this.emit('ability', `${c.info.name} gets a -1/-1 counter and untaps${this.toughness(c) <= 0 ? ' — and dies' : ''}.`, { seat: p.seat, cards: [c.id] });
+            this.checkState();
+            if (c.zone !== 'bf') {
+              // Myrkul made an enchantment copy: it is no creature, so the -1/-1 counters cost nothing
+              const copy = p.bf.find((x) => x.ench && x.info.name === c.info.name && !x.tapped);
+              if (!copy) break;
+              this.emit('combo', `${copy.info.name} is an enchantment now: it untaps for free, so it can make players discard their whole hand.`, { seat: p.seat, cards: [copy.id] });
+              for (let k = 0; k < 40 && this.opps(p).some((q) => q.hand.length); k++) this.resolveEffects(p, ab.fx, copy, null, false);
+              copy.tapped = true;
+              break;
+            }
+          } else c.tapped = false;
+          this.resolveEffects(p, ab.fx, c, null, false); c.tapped = true;
         }
       }
+      this._sacMv = null;
+      this.checkState();
+    }
+    // Activated abilities that are worth doing now, best first
+    abilityOptions(p, postCombat, used) {
+      const out = [];
+      for (const c of p.bf) {
+        if (c.zone !== 'bf') continue;
+        c.info.activated.forEach((ab, i) => {
+          if (used && used.has(c.id + ':' + i)) return;
+          const prep = this.prepareAbility(p, c, ab, postCombat);
+          if (prep) { prep.key = c.id + ':' + i; prep.s = this.abilityScore(p, prep); if (prep.s > 0) out.push(prep); }
+        });
+      }
+      return out.sort((a, b) => b.s - a.s);
+    }
+    activateAbilities(p, postCombat) {
+      if (this.over || p.lost) return;
+      const used = this._usedAbilities && this._usedAbilities.turn === this.turn ? this._usedAbilities.set : new Set();
+      this._usedAbilities = { turn: this.turn, set: used };
+      for (let guard = 0; guard < 30 && !this.over && !p.lost; guard++) {
+        const best = this.abilityOptions(p, postCombat, used)[0];
+        if (!best) break;
+        used.add(best.key);
+        this.doActivate(p, best);
+      }
+      if (this.myrkulSacs(p)) this.activateAbilities(p, postCombat);
       if (postCombat) this.lateGameMana(p);
+    }
+    // Myrkul: sacrifice creatures that are better as enchantment copies (enters triggers again, keeps its abilities)
+    myrkulSacs(p) {
+      if (!p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'))) return false;
+      let n = 0;
+      for (let guard = 0; guard < 6; guard++) {
+        const outlet = this.sacOutlets(p).filter((o) => !o.info.sacOutlet.mana || this.pay(p, parseCost(String(o.info.sacOutlet.mana))))[0];
+        if (!outlet) break;
+        const c = p.bf.filter((x) => x !== outlet && x.info.isCreature && !x.token && !x.isCommander && !x.info.sacOutlet && this.myrkulGain(x) >= 6 && this.creatureValue(x) < 12).sort((a, b) => this.myrkulGain(b) - this.myrkulGain(a))[0];
+        if (!c) break;
+        this.emit('ability', `${p.name} sacrifices ${c.info.name} to ${outlet.info.name} so Myrkul brings it back as an enchantment.`, { seat: p.seat, cards: [outlet.id, c.id] });
+        if (!this.sacrifice(p, c, outlet)) break;
+        n++; this.checkState(); if (this.over || p.lost) break;
+      }
+      return n > 0;
     }
 
     // Post-combat uses of leftover resources
@@ -3559,30 +3707,66 @@
       const blockers = q.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b));
       const totalPower = cands.reduce((s, a) => s + this.power(a), 0);
       const lethalish = totalPower >= q.life;
-      const threatOnMe = Math.max(0, ...this.opps(p).map((o) => o.bf.filter((c) => c.info.isCreature).reduce((s, c) => s + this.power(c), 0)));
       const attackers = [];
+      const fsOf = (c) => this.hasKw(c, 'first strike') || this.hasKw(c, 'double strike');
       for (const a of cands.sort((x, y) => this.power(y) - this.power(x))) {
         const [ap, at] = this.pt(a);
         const ak = this.kws(a);
         const able = blockers.filter((b) => this.canBlock(b, a));
-        const badBlock = able.some((b) => {
+        const aVal = this.creatureValue(a);
+        // How each possible block goes: does the blocker kill the attacker, and does it survive?
+        // First strike matters: an attacker that kills its blocker first takes no damage back.
+        const outcomes = able.map((b) => {
           const [bp, bt] = this.pt(b);
-          const kills = bp >= at || this.hasKw(b, 'deathtouch');
-          const survives = bt > ap && !ak.has('deathtouch') || this.hasKw(b, 'indestructible');
-          return kills && survives && !ak.has('indestructible');
+          const aKillsB = (ap >= bt || ak.has('deathtouch')) && !this.hasKw(b, 'indestructible');
+          const aFirst = fsOf(a) && !fsOf(b);
+          const bKillsA = !(aFirst && aKillsB) && (bp >= at || (this.hasKw(b, 'deathtouch') && bp > 0)) && !ak.has('indestructible');
+          return { b, aKillsB, bKillsA, bVal: this.creatureValue(b) };
         });
-        const trade = able.some((b) => { const [bp] = this.pt(b); return (bp >= at || this.hasKw(b, 'deathtouch')) && !ak.has('indestructible'); });
-        let go = !badBlock && (!trade || this.creatureValue(a) < 6 || able.length === 0);
+        const badBlock = outcomes.some((o) => o.bKillsA && !o.aKillsB);
+        // a trade is only fine if what we lose is worth no more than what they lose (a 1/1 deathtouch for our bomb is not)
+        const worstTrade = outcomes.filter((o) => o.bKillsA && o.aKillsB).sort((x, y) => x.bVal - y.bVal)[0];
+        const badTrade = worstTrade && aVal > worstTrade.bVal + 2 && aVal >= 6;
+        let go = !badBlock && !badTrade;
+        // Kaalia and friends: the attack trigger is the point, so swing whenever there is something to put in
+        const cheat = a.info.attack.some((f) => f.k === 'cheatAttack' && p.hand.some((c) => c.info.isCreature && f.subs.some((s2) => (c.info.subtypes || []).includes(s2))));
+        const valueTrig = cheat || a.info.attack.some((f) => f.k === 'extraCombat' || f.k === 'tokens' || f.k === 'draw' || f.k === 'drain');
+        if (cheat) go = true;
+        else if (valueTrig && !badBlock) go = true;
         if (lethalish) go = true;
-        if (a.isCommander && trade && !lethalish && able.length) go = !badBlock && this.R() < 0.3;
-        if (ak.has('vigilance')) go = go || !badBlock;
-        // keep a blocker back if under heavy threat
-        if (!ak.has('vigilance') && p.life <= threatOnMe && !lethalish && a.info.toughness >= 2 && attackers.length >= 1 && this.R() < 0.6) go = false;
+        if (a.isCommander && !cheat && (badBlock || worstTrade) && !lethalish) go = false;
         // creatures that are worth more at home don't swing into risk: walls, damage sponges, engines, mana dorks
         const defensive = a.info.statics.some((x) => x.k === 'palisade') || (at >= ap * 2 && ap <= 3) || a.info.mana || a.info.sacOutlet || a.info.statics.some((x) => ['anthem', 'debuff', 'tokenDouble', 'counterDouble', 'gisela', 'dmgTriple', 'allIndestructible'].includes(x.k)) || a.info.triggers.length || a.info.deathWatch.length;
-        if (defensive && !lethalish && !ak.has('vigilance') && (able.length || ap <= 2)) go = false;
+        if (defensive && !lethalish && !ak.has('vigilance') && !valueTrig && (able.length || ap <= 2)) go = false;
+        if (ap <= 0 && !valueTrig) go = false;
         if (a.info.mustAttack || this._forceAttack) go = true;
         if (go) attackers.push(a);
+      }
+      // Hold back enough blockers to survive the crack-back: estimate what the opponents can swing at us
+      // next turn and keep the creatures that would block best (vigilance attackers still block).
+      if (!lethalish && !this._forceAttack) {
+        const canBlockAny = (b, a) => { const t = b.tapped; b.tapped = false; const r = this.canBlock(b, a); b.tapped = t; return r; };
+        const incoming = (home) => {
+          let worst = 0;
+          for (const o of this.opps(p)) {
+            const atk = o.bf.filter((c) => c.info.isCreature && !this.pacified(c) && this.power(c) > 0).sort((x, y) => this.power(y) - this.power(x));
+            const used = new Set(); let dmg = 0;
+            for (const a of atk) {
+              const b = home.find((h) => !used.has(h) && canBlockAny(h, a));
+              if (b) used.add(b); else dmg += this.power(a);
+            }
+            worst = Math.max(worst, dmg);
+          }
+          return worst;
+        };
+        const homeOf = () => p.bf.filter((c) => c.info.isCreature && !this.pacified(c) && (!attackers.includes(c) || this.hasKw(c, 'vigilance')));
+        // drop the least valuable non-vigilance attacker that would be a useful blocker until we are safe
+        for (let guard = 0; guard < 10 && attackers.length && incoming(homeOf()) >= p.life; guard++) {
+          const keep = attackers.filter((a) => !this.hasKw(a, 'vigilance') && !a.info.mustAttack && this.toughness(a) >= 2 && !a.info.attack.some((f) => f.k === 'cheatAttack'))
+            .sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0];
+          if (!keep) break;
+          attackers.splice(attackers.indexOf(keep), 1);
+        }
       }
       // Sphere of Safety: pay X per attacker
       const sphereX = this.has(q, 'sphere') ? q.bf.filter((c) => c.info.types.has('Enchantment')).length : 0;
@@ -3619,7 +3803,8 @@
       }
       for (const a of attackers) { if (!this.hasKw(a, 'vigilance')) a.tapped = true; a.attacking = true; }
       const atkInfo = attackers.map((a) => ({ id: a.id, to: assign.get(a.id) || null }));
-      this.emit('attack', `${p.name} attacks ${q.name} with ${attackers.length} creature${attackers.length > 1 ? 's' : ''} (${attackers.reduce((s, a) => s + this.power(a), 0)} power).`, { seat: p.seat, cards: attackers.map((a) => a.id), attackers: atkInfo, target: q.seat });
+      const atkNames = attackers.map((a) => { const w = assign.get(a.id); return `${a.info.name}${a.token ? ' token' : ''} ${this.power(a)}/${this.toughness(a)}${w ? ` → ${this.cards[w].info.name}` : ''}`; });
+      this.emit('attack', `${p.name} attacks ${q.name} with ${this.listNames(atkNames)} (${attackers.reduce((s, a) => s + this.power(a), 0)} power).`, { seat: p.seat, cards: attackers.map((a) => a.id), attackers: atkInfo, target: q.seat });
       // Alibou: artifact creatures attacking
       if (attackers.some((a) => a.info.types.has('Artifact'))) for (const src of p.bf) if (src.info.triggers.some((t) => t.k === 'alibou')) {
         const x = p.bf.filter((c) => c.info.types.has('Artifact') && c.tapped).length;
@@ -3646,7 +3831,7 @@
       // blocks
       const blocks = this.declareBlocks(q, attackers.filter((a) => a.zone === 'bf' && !assign.get(a.id)), p);
       const blkInfo = [...blocks.entries()].flatMap(([aid, bs]) => bs.map((b) => ({ id: b.id, blocks: aid })));
-      if (blkInfo.length) this.emit('block', `${q.name} blocks with ${blkInfo.length} creature${blkInfo.length > 1 ? 's' : ''}.`, { seat: q.seat, cards: blkInfo.map((b) => b.id), attackers: atkInfo, blockers: blkInfo, target: q.seat });
+      if (blkInfo.length) this.emit('block', `${q.name} blocks: ${[...blocks.entries()].map(([aid, bs]) => `${bs.map((b) => b.info.name + (b.token ? ' token' : '')).join(' + ')} blocks ${this.cards[aid].info.name}`).join('; ')}.`, { seat: q.seat, cards: blkInfo.map((b) => b.id), attackers: atkInfo, blockers: blkInfo, target: q.seat });
       // Spore Frog style fogs when the hit would be big
       const incoming = attackers.filter((a) => a.zone === 'bf' && !blocks.has(a.id)).reduce((s2, a) => s2 + this.power(a), 0);
       const frog = q.bf.find((c) => c.info.fogSac);
@@ -3776,15 +3961,23 @@
         if (ak.has('menace') && able.length < 2) continue;
         let choice = null;
         // good block: kill and survive
-        choice = able.find((b) => { const [bp, bt] = this.pt(b); return (bp >= at || this.hasKw(b, 'deathtouch')) && !ak.has('indestructible') && (bt > ap || this.hasKw(b, 'indestructible')) && !ak.has('deathtouch'); });
+        const aFS = ak.has('first strike') || ak.has('double strike');
+        const strikesBack = (b) => !aFS || this.hasKw(b, 'first strike') || this.hasKw(b, 'double strike') || this.pt(b)[1] > ap || this.hasKw(b, 'indestructible');
+        choice = able.find((b) => { const [bp, bt] = this.pt(b); return (bp >= at || this.hasKw(b, 'deathtouch')) && strikesBack(b) && !ak.has('indestructible') && (bt > ap || this.hasKw(b, 'indestructible')) && !ak.has('deathtouch'); });
         // safe block: survive
         if (!choice) choice = able.find((b) => { const [, bt] = this.pt(b); return (bt > ap || this.hasKw(b, 'indestructible')) && !ak.has('deathtouch') && !ak.has('trample'); });
         // trade
-        if (!choice) choice = able.filter((b) => { const [bp] = this.pt(b); return (bp >= at || this.hasKw(b, 'deathtouch')) && !ak.has('indestructible') && this.creatureValue(b) <= this.creatureValue(a) + 1; }).sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0];
+        if (!choice) choice = able.filter((b) => { const [bp] = this.pt(b); return (bp >= at || this.hasKw(b, 'deathtouch')) && strikesBack(b) && !ak.has('indestructible') && this.creatureValue(b) <= this.creatureValue(a) + 1; }).sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0];
         // chump when in danger
         const cmdLethal = a.isCommander && (q.cmdDmg[a.id] || 0) + ap >= 21;
         if (!choice && (remaining >= q.life || cmdLethal || (remaining >= q.life * 0.6 && ap >= 6))) {
           choice = able.filter((b) => !b.isCommander).sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0];
+        }
+        if (choice && ak.has('menace')) {
+          // menace: a second blocker is required; add the cheapest other one, or don't block
+          const second = able.filter((b) => b !== choice && !b.isCommander).sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0];
+          if (!second) choice = null;
+          else { blocks.set(a.id, [choice, second]); avail.splice(avail.indexOf(choice), 1); avail.splice(avail.indexOf(second), 1); if (!ak.has('trample')) remaining -= ap; continue; }
         }
         if (choice) {
           blocks.set(a.id, [choice]);

@@ -112,7 +112,7 @@ const EXPECT = {
   proliferate: (a, b) => b.me.counters > a.me.counters || sum(b.opp, 'poison') > sum(a.opp, 'poison'),
   doubleCounters: (a, b) => b.me.counters > a.me.counters,
   ramp: (a, b) => b.me.lands > a.me.lands || b.me.hand > a.me.hand,
-  tutor: (a, b) => b.me.hand > a.me.hand || b.me.lib < a.me.lib, tutorBF: (a, b) => b.me.bf > a.me.bf,
+  tutor: (a, b) => b.me.hand > a.me.hand || b.me.lib < a.me.lib || b.me.top !== a.me.top, tutorBF: (a, b) => b.me.bf > a.me.bf,
   search: (a, b) => b.me.lib < a.me.lib,
   reanimate: (a, b) => b.me.bf > a.me.bf, reanimateType: (a, b) => b.me.bf > a.me.bf, massReanimate: (a, b) => b.me.bf > a.me.bf,
   reanimateArtifact: (a, b) => b.me.bf > a.me.bf, massRegrow: (a, b) => b.me.bf > a.me.bf || b.me.hand > a.me.hand,
@@ -284,6 +284,95 @@ for (const name of Object.keys(db).sort()) {
     return { ok: got.length > 0 && !bad.length, note: `got ${got.map((c) => c.name).join(', ') || 'nothing'}` };
   });
 }
+
+// ---------- rules scenarios: interactions that went wrong in watched games ----------
+const scen = (cardName, label, fn) => { if (!only || only === cardName) staticCheck(cardName, label, fn); };
+scen('Valgavoth, Terror Eater', 'a spell cast from Valgavoth\'s exile goes to its owner\'s graveyard afterwards', () => {
+  const g = table(); const [me, opp] = g.players;
+  put(g, me, 'Valgavoth, Terror Eater');
+  const rift = card(g, opp, 'Cyclonic Rift', 'exile'); rift.voidBy = me.seat;
+  g.castSpell(me, rift, 'valgavoth');
+  return { ok: rift.zone === 'gy' && opp.gy.includes(rift) && !opp.exile.includes(rift), note: `Cyclonic Rift ended in ${rift.zone}` };
+});
+scen('Valgavoth, Terror Eater', 'an opponent\'s card headed to their graveyard is exiled instead', () => {
+  const g = table(); const [me, opp] = g.players;
+  put(g, me, 'Valgavoth, Terror Eater'); const c = card(g, opp, 'Sol Ring', 'hand');
+  g.discardCard(opp, c);
+  return { ok: c.zone === 'exile' && c.voidBy === me.seat, note: c.zone };
+});
+for (const name of ['Vampiric Tutor', 'Imperial Seal', 'Enlightened Tutor']) scen(name, 'puts the card on top of the library, not into hand', () => {
+  const g = table(); const me = g.players[0]; const c = card(g, me, name, 'hand');
+  const hand0 = me.hand.length; g.castSpell(me, c, 'hand');
+  return { ok: me.hand.length === hand0 - 1 && me.library[0] && !me.library[0].info.isLand, note: `top: ${me.library[0] && me.library[0].name}` };
+});
+scen('Sigarda, Host of Herons', 'stops an opponent\'s Sheoldred from forcing a sacrifice', () => {
+  const g = table(); const [me, opp] = g.players;
+  put(g, me, 'Sigarda, Host of Herons'); put(g, me, 'Birds of Paradise'); const sh = put(g, opp, 'Sheoldred, Whispering One');
+  const n0 = me.bf.length; g._thatPlayer = me; g.resolveEffect(opp, { k: 'edictThat' }, sh, 0, true); g._thatPlayer = null;
+  return { ok: me.bf.length === n0, note: `${n0 - me.bf.length} sacrificed` };
+});
+scen('Plaguecrafter', 'the log names what each player sacrificed', () => {
+  const g = new Game([decks[0], decks[1], decks[2], decks[3]], db, 5, { record: true });
+  g.started = true; for (const p of g.players) { p.bf = []; p.hand = []; }
+  const [me, opp] = g.players; put(g, opp, 'Birds of Paradise'); const pc = put(g, me, 'Plaguecrafter');
+  g.resolveEffects(me, pc.info.etb, pc, null, false);
+  const ev = g.events.filter((e) => /Plaguecrafter/.test(e.text)).pop();
+  return { ok: !!ev && /Birds of Paradise/.test(ev.text) && /Plaguecrafter/.test(ev.text.split(':').slice(1).join(':')), note: ev ? ev.text : 'no log line' };
+});
+scen('Spark Double', 'a copy of a legendary creature is not legendary', () => {
+  const g = table(); const me = g.players[0];
+  put(g, me, 'Atraxa, Praetors\' Voice'); const sd = card(g, me, 'Spark Double', 'hand');
+  g.castSpell(me, sd, 'hand');
+  const legends = me.bf.filter((c) => c.info.name === 'Atraxa, Praetors\' Voice');
+  return { ok: legends.length === 2 && legends.some((c) => !c.info.isLegendary && !c.info.types.has('Legendary')), note: `${legends.length} Atraxas on the battlefield` };
+});
+scen('Pattern of Rebirth', 'is not cast without a creature of our own to enchant', () => {
+  const g = table(); const me = g.players[0]; const c = card(g, me, 'Pattern of Rebirth', 'hand');
+  return { ok: g.scoreCast(me, c, 'hand') < 0, note: `score ${g.scoreCast(me, c, 'hand')}` };
+});
+scen("Serra's Emissary", 'creatures can\'t target our creatures (protection from creatures)', () => {
+  const g = table(); const [me, opp] = g.players; put(g, me, "Serra's Emissary"); const bird = put(g, me, 'Birds of Paradise');
+  const chupa = put(g, opp, 'Craterhoof Behemoth'); g._ctx.push(chupa); const ok = !g.targetable(bird, opp); g._ctx.pop();
+  return { ok, note: ok ? '' : 'Chupacabra could target' };
+});
+scen('Ugin, the Spirit Dragon', '−X exiles (not destroys) the coloured permanents', () => {
+  const g = table(); const [me, opp] = g.players; const u = put(g, me, 'Ugin, the Spirit Dragon'); u.uginX = 3;
+  g.resolveEffect(me, { k: 'wipe', what: 'ugin', exile: true }, u, 3, true);
+  return { ok: opp.exile.some((c) => c.name === 'Birds of Paradise') || opp.bf.every((c) => c.name !== 'Birds of Paradise'), note: 'Birds in ' + (opp.exile.some((c) => c.name === 'Birds of Paradise') ? 'exile' : 'graveyard') };
+});
+scen('Cinderhaze Wretch', 'with Myrkul it dies, comes back as an enchantment and empties a hand', () => {
+  const g = table(); const [me, opp] = g.players;
+  put(g, me, 'Myrkul, Lord of Bones'); const w = put(g, me, 'Cinderhaze Wretch');
+  for (const q of g.players.slice(1)) for (let i = 0; i < 5; i++) card(g, q, 'Forest', 'hand');
+  const ab = w.info.activated[0]; const prep = g.prepareAbility(me, w, ab, true);
+  if (prep) g.doActivate(me, prep);
+  const copy = me.bf.find((c) => c.ench && c.info.name === 'Cinderhaze Wretch');
+  return { ok: !!copy && g.players.slice(1).every((q) => q.hand.length === 0), note: `copy: ${!!copy}, hands: ${g.players.slice(1).map((q) => q.hand.length).join('/')}` };
+});
+scen('Osgir, the Reconstructor', 'copies Wurmcoil Engine from the graveyard when it has the mana', () => {
+  const g = table(); const me = g.players[0]; put(g, me, 'Osgir, the Reconstructor'); card(g, me, 'Wurmcoil Engine', 'gy');
+  g.mainPhase(me);
+  return { ok: me.bf.filter((c) => c.token && c.name === 'Wurmcoil Engine').length === 2, note: `${me.bf.filter((c) => c.token && c.name === 'Wurmcoil Engine').length} Wurmcoil tokens` };
+});
+scen('Razaketh, the Foulblooded', 'sacrifices a token to tutor rather than feeding it to Grim Backwoods', () => {
+  const g = table(); const me = g.players[0]; put(g, me, 'Razaketh, the Foulblooded'); put(g, me, 'Grim Backwoods');
+  g.addToken(me, { p: 1, t: 1, sub: 'Pest', colors: 'black green' }, 1, true);
+  const used = []; const orig = g.doActivate.bind(g); g.doActivate = (p, prep) => { used.push(prep.c.name); return orig(p, prep); };
+  g.activateAbilities(me, true);
+  return { ok: used[0] === 'Razaketh, the Foulblooded', note: `first: ${used[0] || 'nothing'}` };
+});
+scen('Kaalia of the Vast', 'attacks when there is an Angel, Demon or Dragon in hand to put in', () => {
+  const g = table(); const [me, opp] = g.players; const k = put(g, me, 'Kaalia of the Vast'); k.isCommander = true;
+  put(g, opp, 'Vampire Nighthawk'); card(g, me, 'Lyra Dawnbringer', 'hand');
+  g.combat(me);
+  return { ok: me.bf.some((c) => c.name === 'Lyra Dawnbringer'), note: me.bf.some((c) => c.name === 'Lyra Dawnbringer') ? '' : 'Kaalia stayed home' };
+});
+scen('combat', 'a big creature does not attack into an untapped deathtouch blocker', () => {
+  const g = table(); const [me, opp] = g.players; const big = put(g, me, 'Craterhoof Behemoth');
+  for (const q of g.players.slice(1)) put(g, q, 'Vampire Nighthawk');
+  g.combat(me);
+  return { ok: big.zone === 'bf' && !big.tapped, note: big.tapped ? 'attacked' : '' };
+});
 
 // ---------- report ----------
 const fails = results.filter((r) => !r.ok);

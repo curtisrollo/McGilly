@@ -191,8 +191,9 @@
     const groups = new Map();
     for (const b of lands) {
       const m = state.meta[b.id];
-      const g = groups.get(m.name) || { n: 0, tapped: 0, id: b.id, focus: false, colors: m };
-      g.n++; if (b.tp) g.tapped++; if (focus.has(b.id)) g.focus = true; if (state.tappedFor && state.tappedFor.has(b.id)) g.src = true; groups.set(m.name, g);
+      const nm = b.nm || m.name;
+      const g = groups.get(nm) || { n: 0, tapped: 0, id: b.id, focus: false, colors: m };
+      g.n++; if (b.tp) g.tapped++; if (focus.has(b.id)) g.focus = true; if (state.tappedFor && state.tappedFor.has(b.id)) g.src = true; groups.set(nm, g);
     }
     return [...groups.entries()].map(([name, g]) => {
       const untapped = g.n - g.tapped;
@@ -256,9 +257,10 @@
       const cls = ['seat', ev.active === i && ev.turn ? 'active' : '', snap.target === i && (ev.kind === 'attack' || ev.kind === 'block' || ev.kind === 'damage') ? 'targeted' : '', s.lost ? 'dead' : '', isWinner ? 'winner' : ''].join(' ');
       const bf = s.bf.filter((b) => state.meta[b.id]);
       const isCr = (b) => (b.cr != null ? !!b.cr : state.meta[b.id].creature);
-      const lands = bf.filter((b) => state.meta[b.id].land && !isCr(b));
+      const isLandB = (b) => state.meta[b.id].land || !!b.ld;
+      const lands = bf.filter((b) => isLandB(b) && !isCr(b));
       const creatures = bf.filter((b) => isCr(b));
-      const others = bf.filter((b) => !state.meta[b.id].land && !isCr(b));
+      const others = bf.filter((b) => !isLandB(b) && !isCr(b));
       const byId = Object.fromEntries(bf.map((b) => [b.id, b]));
       const nameOf = (id) => (state.meta[id] ? state.meta[id].name : '');
       const cmdDmg = Object.entries(s.cmdDmg).filter(([, v]) => v > 0).map(([k, v]) => `<span class="cmddmg" title="Commander damage from ${esc(nameOf(k))}">${esc(nameOf(k).split(',')[0])} <b>${v}</b>/21</span>`).join('');
@@ -281,7 +283,7 @@
         <div class="seat-body">
           <div class="zone">${cmdTiles ? `<span class="zl">Command</span>${cmdTiles}` : ''}<span class="zl">Creatures ${creatures.length}</span>${creatures.length ? tiles(creatures) : (ghostTiles ? '' : '<span class="empty">none</span>')}${ghostTiles}</div>
           ${others.length ? `<div class="zone"><span class="zl">Other ${others.length}</span>${tiles(others)}</div>` : ''}
-          <div class="lands"><span class="zl">Lands ${lands.length}</span>${lands.length ? landChips(lands, focus) : '<span class="empty">none</span>'}</div>
+          <div class="lands"><span class="zl" title="untapped / total lands">Lands <b class="lu">${lands.filter((b) => !b.tp).length}</b>/${lands.length}</span>${lands.length ? landChips(lands, focus) : '<span class="empty">none</span>'}</div>
           ${hand}
         </div>
       </section>`;
@@ -349,7 +351,7 @@
     if (m) {
       const ev = state.events[state.idx];
       const live = ev && ev.snap.players.flatMap((x) => x.bf).find((b) => b.id === state.inspect);
-      if (live && live.nm) m = { ...m, name: live.nm, text: live.tx || m.text };
+      if (live && live.nm) m = { ...m, name: live.nm, text: live.tx || m.text, types: live.ty || m.types };
     }
     if (!m) { el.hidden = true; return; }
     el.hidden = false;
