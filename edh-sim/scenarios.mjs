@@ -724,4 +724,32 @@ export default [
       return { ok: g.scoreCast(me, k, 'hand') < 0, note: '' };
     },
   },
+  {
+    card: 'Marauding Blight-Priest', title: 'two lifelinkers in one combat trigger it twice',
+    wrong: 'all lifelink in a combat step was one life gain, so it triggered once',
+    run({ table, put }) {
+      const g = table(); const [me] = g.players; put(g, me, 'Marauding Blight-Priest'); put(g, me, 'Vampire Nighthawk'); put(g, me, 'Vampire Nighthawk');
+      const opps0 = g.players.slice(1).map((q) => q.life);
+      g.chooseDefender = () => g.players[1]; g._forceAttack = true; g.combat(me); g._forceAttack = false;
+      const lost = g.players.slice(1).map((q, i) => opps0[i] - q.life);
+      return { ok: lost[1] >= 2 && lost[2] >= 2, note: `opponents not attacked lost ${lost.slice(1).join(', ')}` };
+    },
+  },
+  {
+    card: 'Ugin, the Ineffable', title: '-3 destroys only a permanent that has a colour',
+    wrong: 'it could destroy colorless artifacts',
+    run({ table, put }) {
+      const g = table(); const u = put(g, g.players[0], 'Ugin, the Ineffable');
+      return { ok: u.info.loyaltyAbs.find((x) => x.delta === -3).fx[0].what === 'colored', note: '' };
+    },
+  },
+  {
+    card: 'Archivist of Oghma', title: 'an opponent cracking a fetchland counts as searching',
+    wrong: 'fetchlands never triggered it',
+    run({ table, put, card }) {
+      const g = table(); const [me, opp] = g.players; put(g, me, 'Archivist of Oghma'); const h0 = me.hand.length;
+      const f = card(g, opp, 'Marsh Flats', 'hand'); g.removeFrom(opp.hand, f); g.enterBattlefield(f, opp, {});
+      return { ok: me.hand.length === h0 + 1, note: `drew ${me.hand.length - h0}` };
+    },
+  },
 ];

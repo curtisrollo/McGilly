@@ -674,7 +674,7 @@
     'Force of Negation': (a, cover) => { a.freeAlt = true; a.freeAltNotYourTurn = true; cover(ALL); },
     'Forsaken Monument': (a, cover) => { a.monument = true; cover(ALL); },
     'Foundry Inspector': (a, cover) => { a.statics.push({ k: 'reduce', what: 'artifact', n: 1 }); cover(ALL); },
-    'Ugin, the Ineffable': (a, cover) => { a.statics.push({ k: 'reduce', what: 'colorless', n: 2 }); cover(/cost/); },
+    'Ugin, the Ineffable': (a, cover) => { a.statics.push({ k: 'reduce', what: 'colorless', n: 2 }); const m3 = a.loyaltyAbs.find((x) => x.delta === -3); if (m3) m3.fx = [{ k: 'removal', what: 'colored' }]; cover(/cost/); },
     'Oath of Ajani': (a, cover) => { a.statics.push({ k: 'reduce', what: 'planeswalker', n: 1 }); cover(/cost/); },
     'The Great Henge': (a, cover) => { a.henge = true; cover(/costs \{X\} less/); },
     'Gravebreaker Lamia': (a, cover) => { a.etb = [{ k: 'search', n: 1, what: 'card', dest: 'gy' }]; a.statics.push({ k: 'reduceGy', n: 1 }); cover(ALL); },
@@ -1927,7 +1927,7 @@
           const fetchLife = /pay 1 life/i.test(c.info.text) ? 1 : 0;
           if (want.length && this.canPayLife(p, fetchLife)) {
             const pick = want.sort((a, b) => this.landValue(p, b) - this.landValue(p, a))[0];
-            this.removeFrom(p.library, pick); this.R.shuffle(p.library);
+            this.removeFrom(p.library, pick); this.R.shuffle(p.library); this.searched(p); // a search (Archivist of Oghma sees it)
             this.moveToGraveyard(c);
             if (/pay 1 life/i.test(c.info.text)) this.loseLife(p, 1);
             this.enterBattlefield(pick, p, { tapped: c.info.fetch.tapped && !(/four or more lands/i.test(c.info.text || '') && p.bf.filter((x) => x.info.isLand).length >= 4), quiet: true });
@@ -2160,7 +2160,7 @@
             creature: (c) => c.info.isCreature, creaturepw: (c) => c.info.isCreature || c.info.isPW, nonland: (c) => !c.info.isLand,
             artifact: (c) => c.info.types.has('Artifact'), enchantment: (c) => c.info.types.has('Enchantment'),
             artench: (c) => c.info.types.has('Artifact') || c.info.types.has('Enchantment'), planeswalker: (c) => c.info.isPW,
-            nonlandNonPW: (c) => !c.info.isLand && !c.info.isPW, permanent: () => true, tappedCreature: (c) => c.info.isCreature && c.tapped,
+            nonlandNonPW: (c) => !c.info.isLand && !c.info.isPW, permanent: () => true, tappedCreature: (c) => c.info.isCreature && c.tapped, colored: (c) => !c.info.isLand && c.info.colors && c.info.colors.size > 0,
           }[fx.what] || ((c) => !c.info.isLand);
           const tgt = src && src._target ? src._target : this.bestOppTarget(p, (c) => pred(c) && this.targetable(c, p));
           if (!tgt || tgt.zone !== 'bf') break;
@@ -3900,7 +3900,8 @@
       if (!this.abilityUseful(p, ab, c, postCombat)) return null;
       let fodder = [];
       if (ab.sacArtifact) {
-        fodder = p.bf.filter((x) => x !== c && x.info.types.has('Artifact') && !x.isCommander).sort((a, b) => this.permValue(a) - this.permValue(b)).slice(0, ab.sacArtifact);
+        const plusOne = ab.fx.some((f) => f.mvPlusOne);
+        fodder = p.bf.filter((x) => x !== c && x.info.types.has('Artifact') && !x.isCommander && (!plusOne || p.library.some((l) => l.info.types.has('Artifact') && l.info.mv === x.info.mv + 1))).sort((a, b) => this.permValue(a) - this.permValue(b)).slice(0, ab.sacArtifact);
         if (fodder.length < ab.sacArtifact || fodder.some((x) => this.permValue(x) > 8)) return null;
       }
       if (ab.sacCreature) {
@@ -4157,6 +4158,7 @@
         for (const f of a.fx) {
           if (f.k === 'removal' || f.k === 'phaseOut' || f.k === 'freeze' || f.k === 'neutralize') s += this.bestOppTarget(p, (x) => (f.what === 'creature' || f.k === 'phaseOut' ? x.info.isCreature : !x.info.isLand) && this.targetable(x, p)) ? 9 : -5;
           else if (f.k === 'wipe') s += this.scoreCast(p, { info: { ...c.info, spell: [f], etb: [], isPermanent: false, isPW: false, mana: null, isCreature: false } }, 'hand') > 0 ? 14 : -10;
+          else if (f.k === 'darettiWeld') { const fod = p.bf.some((x) => x.info.types.has('Artifact') && !x.isCommander && this.permValue(x) < 5); const best = Math.max(0, ...p.gy.filter((x) => x.info.types.has('Artifact') && x.info.isPermanent).map((x) => this.cardValue(p, x))); s += fod && best >= 6 ? 6 + best : -10; }
           else if (f.k === 'tokens') s += 5; else if (f.k === 'draw') s += 4; else if (f.k === 'drain') s += 4;
           else if (f.k === 'emblem' || f.k === 'massReanimate' || f.k === 'exileLibrary' || f.k === 'mindslaver' || f.k === 'liliana9' || f.k === 'piles' || f.k === 'extraTurn') s += 15;
           else if (f.k === 'lifeBecomes') s += this.opps(p).some((q) => q.life > 25) ? 10 : -5;
@@ -4445,7 +4447,7 @@
             if (d > 0) { a.dmg += d; if (bk.has('deathtouch')) a.dt = true; if (bk.has('lifelink')) this.gainLife(q, d); }
           }
         }
-        if (lifelinkGain.length) { this.gainLife(p, lifelinkGain.reduce((s, x) => s + x, 0)); lifelinkGain.length = 0; }
+        if (lifelinkGain.length) { for (const n of lifelinkGain) if (n > 0) this.gainLife(p, n); lifelinkGain.length = 0; }
         this.checkState();
       };
       const anyFS = attackers.concat(...blocks.values()).some((c) => this.hasKw(c, 'first strike') || this.hasKw(c, 'double strike'));
