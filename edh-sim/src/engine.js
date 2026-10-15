@@ -905,6 +905,7 @@
       this.explore = opts.explore || 0;             // random noise on choices while training, so the net sees variety
       this.lookahead = opts.lookahead !== false && !(typeof process !== 'undefined' && process.env && process.env.NOLOOK);    // try the best few plays on a copy of the game before choosing (see lookPick)
       this.lookSeats = opts.lookSeats || null;      // which seats search (default: all)
+      this.politics = opts.politics ?? (typeof process !== 'undefined' && process.env && process.env.POLITICS ? +process.env.POLITICS : 40); // weight on attacking whoever is most likely to win
       this.samples = []; this.mullSamples = [];
     }
 
@@ -3321,7 +3322,7 @@
         if (f.k === 'draw') s += 6 + this.fxNum(p, f.n, 1) * 3 + (p.hand.length < 3 ? 8 : 0);
         if (f.k === 'wheel') s += p.hand.length < 3 ? 25 : -20;
         if (f.k === 'tutor' && p.tutorTurn === this.turn && p.tutorN >= 2) return -1; // (a tutor coming back to hand, Tamiyo's emblem: two a turn is plenty)
-        if (f.k === 'tutor' || f.k === 'tutorBF') s += 14;
+        if (f.k === 'tutor' || f.k === 'tutorBF') { if (f.top && p.library[0] && this.chooseTutor(p, f.what || 'card') === p.library[0]) return -1; s += 14; } // (not to put the card that's already on top back on top)
         if (f.k === 'tokens') s += 6 + this.fxNum(p, f.n, 3) * 2;
         if (f.k === 'treasure') s += 4;
         if (f.k === 'removal' || f.k === 'steal') {
@@ -3952,6 +3953,8 @@
       for (const o of options.slice(0, 3)) if ((!greedy.o || o.c.id !== greedy.o.c.id) && close(o)) cands.push({ o });
       for (const a of abs.slice(0, 2)) if ((!greedy.ab || a.key !== greedy.ab.key) && close(a)) cands.push({ ab: a });
       if (cands.length < 2) return null;
+      // only on engine turns, where order matters: an activated ability competes with the spells, or a combo is within reach
+      if (!cands.some((c) => c.ab) && !this.comboWants(p).length) return null;
       const res = cands.map((pk) => {
         try {
           const g = this.cloneForLook(), pp = g.players[p.seat];
@@ -4558,6 +4561,8 @@
         for (const a of attackers) if (!blockers.some((b) => this.canBlock(b, a))) through += this.power(a);
         const total = attackers.reduce((s, a) => s + this.power(a), 0);
         let s = through * 2 + total * 0.5 - blockers.length * 1.5 + this.playerThreat(q) * 0.15 - q.life * 0.2 + this.R() * 3;
+        // table politics: hit the player most likely to win (the network's estimate), not just the one with the fewest blockers
+        if (this.politics && this.nn) s += this.politics * this.nnV(q);
         if (through >= q.life) s += 100;
         if (s > bestS) { bestS = s; best = q; }
       }
