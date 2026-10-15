@@ -1051,6 +1051,7 @@
           }),
         })),
         attackers: extra.attackers || null,
+        stack: extra.stack || null,
         blockers: extra.blockers || null,
         target: extra.target ?? null,
       };
@@ -1799,6 +1800,7 @@
       } else if (label && live.length) this.emit('trigger', `${label}.`, { seat: p.seat, cards: src ? [src.id] : [] });
       // quiet effects don't log themselves, so say what they did: life, cards and boards that changed
       const before = quiet && live.length && this.record ? this.players.map((q) => ({ life: q.life, hand: q.hand.length, bf: q.bf.length })) : null;
+      const evCount = this.events.length;
       for (const fx of fxList) { if (p.lost || this.over) break; this.resolveEffect(p, fx, src, xVal, quiet); }
       if (before) {
         const bits = [];
@@ -1807,7 +1809,8 @@
           if (d) bits.push(`${q.name} ${d > 0 ? 'gains' : 'loses'} ${Math.abs(d)} (${q.life})`);
           if (q.hand.length > b.hand) bits.push(`${q.name} draws ${q.hand.length - b.hand}`);
         });
-        if (bits.length) this.emit('effect', `→ ${bits.join(', ')}.`, { seat: p.seat, cards: src ? [src.id] : [] });
+        // only when the effects didn't already log what they did
+        if (bits.length && this.events.length === evCount + 0) this.emit('effect', `→ ${bits.join(', ')}.`, { seat: p.seat, cards: src ? [src.id] : [] });
       }
     }
 
@@ -2943,7 +2946,7 @@
       p.spellsThisTurn = (p.spellsThisTurn || 0) + 1;
       if (!i.types.has('Artifact')) p.nonArtifactSpells = (p.nonArtifactSpells || 0) + 1;
       const fromTxt = { flashback: ' with flashback', command: ' from the command zone', gy: ' from the graveyard', citadel: ' off the top with Bolas\'s Citadel', top: ' off the top with Mystic Forge', valgavoth: ' from Valgavoth\'s exile', dash: ' for its dash cost' }[from] || '';
-      this.emit('cast', `${p.name} casts ${i.name}${xVal ? ` (X=${xVal})` : ''}${kicks ? ` kicked ${kicks}×` : ''}${fromTxt}.`, { seat: p.seat, cards: [c.id] });
+      this.emit('cast', `${p.name} casts ${i.name}${xVal ? ` (X=${xVal})` : ''}${kicks ? ` kicked ${kicks}×` : ''}${fromTxt}.`, { seat: p.seat, cards: [c.id], stack: [c.id] });
       this.castTriggers(p, c, from);
       // Jace emblem: counter each opponent's first spell each turn
       const jace = this.opps(p).find((q) => (q.emblems || []).includes('jaceCounter'));
@@ -3622,12 +3625,13 @@
       if (this.over || p.lost) return;
       // Beledros: pay 10 life to untap lands when there is something big to cast
       const bel = p.bf.find((c) => c.info.beledros);
-      if (bel && bel.usedTurn !== this.turn && p.life >= 22) {
+      if (bel && bel.usedTurn !== this.turn && p.life >= 30) {
         // only pay the 10 life if untapping actually unlocks a play the AI wants and can now afford
         const tappedLands = p.bf.filter((c) => c.info.isLand && c.tapped);
         const before = new Set(this.castOptions(p).map((o) => o.c.id));
         for (const c of tappedLands) c.tapped = false;
-        const unlocked = this.castOptions(p).filter((o) => !before.has(o.c.id) && o.s >= 12);
+        // 10 life is a lot: only for a big play (a 4+ mana spell that scores well), never for a cheap creature
+        const unlocked = this.castOptions(p).filter((o) => !before.has(o.c.id) && o.s >= 30 && (o.c.info.cost.mv || 0) >= 4);
         for (const c of tappedLands) c.tapped = true;
         if (tappedLands.length >= 3 && unlocked.length) {
           bel.usedTurn = this.turn;
@@ -3739,14 +3743,20 @@
 
     equipStuff(p) {
       for (const eq of p.bf.filter((c) => c.info.isEquipment)) {
-        const best = p.bf.filter((c) => c.info.isCreature && !this.pacified(c)).sort((a, b) => this.creatureValue(b) - this.creatureValue(a))[0];
+        // Skullclamp-style (-toughness): on a creature it kills, the cheaper the better (it draws when that creature dies)
+        const shrink = Math.min(0, ...eq.info.statics.filter((x) => x.k === 'equipBuff').map((x) => x.t || 0));
+        const crs = p.bf.filter((c) => c.info.isCreature && !this.pacified(c));
+        const best = shrink < 0
+          ? (crs.filter((c) => this.toughness(c) <= -shrink && !c.isCommander).sort((a, b) => this.creatureValue(a) - this.creatureValue(b))[0] || null)
+          : crs.sort((a, b) => this.creatureValue(b) - this.creatureValue(a))[0];
         if (!best || eq.attached === best.id) continue;
         if (eq.attached && this.cards[eq.attached] && this.cards[eq.attached].zone === 'bf') continue;
         const cost = eq.info.equip || parseCost('2');
         if (!this.pay(p, cost)) continue;
         this.pay(p, cost, 0, true);
         eq.attached = best.id;
-        this.emit('ability', `${p.name} equips ${eq.info.name} to ${best.info.name}.`, { seat: p.seat, cards: [eq.id, best.id] });
+        this.emit('ability', `${p.name} equips ${eq.info.name} to ${this.cname(best)}.`, { seat: p.seat, cards: [eq.id, best.id] });
+        this.checkState();
       }
     }
 

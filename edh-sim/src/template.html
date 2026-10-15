@@ -20,10 +20,17 @@
     <label class="chk">Seed <input type="number" id="seed" min="0"></label>
     <button type="button" class="btn" id="openMore">Head to head · About</button>
   </header>
-  <div class="now" id="now" aria-live="polite"></div>
   <div class="main">
-    <div class="table" id="table"></div>
-    <aside class="log"><h2>Play-by-play</h2><ol id="log"></ol></aside>
+    <div class="table" id="table">
+      <div class="seats-host" id="seatsHost"></div>
+      <section class="center" aria-label="Play-by-play">
+        <div class="spin" aria-hidden="true" title="Turn order goes clockwise"><svg viewBox="0 0 48 48"><path d="M24 6a18 18 0 1 1-16.6 11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M3 10l4.6 8.4L16 14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="now" id="now" aria-live="polite"></div>
+        <div class="stack" id="stack" aria-label="On the stack"></div>
+        <h2 class="feed-h">Play-by-play <small>newest first</small></h2>
+        <ol id="log" class="feed"></ol>
+      </section>
+    </div>
   </div>
 </div>
 <div class="drawer" id="more" hidden>

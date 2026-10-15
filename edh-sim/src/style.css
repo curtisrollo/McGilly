@@ -283,3 +283,72 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
 .chk-tests .pass::first-letter { color: #6fe39a; } .chk-tests .fail { color: var(--attack); }
 #checkSummary code { font-family: var(--font-num); font-size: 12px; background: var(--rail); padding: 1px 4px; border-radius: 3px; }
 #checkSummary .bad { color: var(--attack); }
+
+/* ---------- table with the play-by-play in the middle ---------- */
+/* Seats sit clockwise around a centre column: what is happening now, the stack, then the feed (newest first) */
+.main { display: block; }
+.seats-host { display: contents; }
+.table { grid-template-columns: minmax(0, 1fr); }
+.center { background: var(--rail); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; position: relative; }
+.center .spin { position: static; margin: 8px auto 0; display: flex; width: 30px; height: 30px; border-radius: 50%; background: var(--felt); border: 1px solid var(--brass-dim); color: var(--brass); align-items: center; justify-content: center; flex: none; }
+.center .spin svg { width: 20px; height: 20px; }
+.center .now { display: block; border-left: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 8px 12px 10px; min-height: 0; background: linear-gradient(180deg, rgba(214,171,85,.10), transparent); }
+.center .now .now-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.center .now .txt { font-size: 15px; line-height: 1.35; white-space: normal; overflow: visible; text-align: center; margin-top: 4px; }
+.center .now .txt .sw { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.center .now.k-attack, .center .now.k-damage, .center .now.k-wipe, .center .now.k-combo, .center .now.k-lose { background: linear-gradient(180deg, rgba(232,100,76,.18), transparent); }
+.center .now.k-win { background: linear-gradient(180deg, rgba(214,171,85,.3), transparent); }
+.stack { display: none; align-items: center; justify-content: center; gap: 6px; padding: 8px; border-bottom: 1px solid var(--line); background: rgba(214,171,85,.06); }
+.stack.on { display: flex; }
+.stack .zl { writing-mode: horizontal-tb; transform: none; border: 0; margin: 0; }
+.stack .c { width: 84px; min-height: 92px; }
+.feed-h { font-family: var(--font-display); font-weight: 400; font-size: 14px; letter-spacing: .05em; margin: 0; padding: 6px 12px; color: var(--brass); display: flex; justify-content: space-between; align-items: baseline; }
+.feed-h small { font-family: var(--font-body); font-size: 10px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.feed { list-style: none; margin: 0; padding: 0 0 6px; overflow-y: auto; flex: 1; min-height: 0; scrollbar-width: thin; }
+.feed li { padding: 3px 12px 3px 14px; font-size: 12.5px; color: var(--muted); border-left: 3px solid transparent; cursor: pointer; }
+.feed li:hover { color: var(--ink); }
+.feed li.cur { color: var(--ink); background: rgba(214,171,85,.10); border-left-color: var(--brass); }
+.feed li:first-child { animation: feedIn .35s ease-out; }
+.feed li.k-turn { color: var(--brass); font-family: var(--font-display); font-size: 14px; padding-top: 7px; }
+.feed li.k-win { color: var(--brass); font-weight: 600; }
+.feed li.k-lose, .feed li.k-wipe, .feed li.k-combo, .feed li.k-counter { color: #f0a594; }
+.feed li .sw { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+@keyframes feedIn { from { opacity: 0; transform: translateY(-6px); background: rgba(214,171,85,.25); } to { opacity: 1; transform: none; } }
+.phantom { position: fixed; z-index: 40; pointer-events: none; }
+.phantom > * { width: 100%; height: 100%; }
+/* the commander's own slot in the seat header */
+.cmdslot { display: flex; align-items: center; gap: 4px; padding: 2px 4px; border: 1px dashed var(--brass-dim); border-radius: 8px; flex: none; }
+.cmdslot .cl { font-size: 8.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--brass-dim); writing-mode: vertical-rl; transform: rotate(180deg); }
+.cmdslot .c { width: 56px; min-height: 58px; }
+.cmdslot .c .pic { height: 16px; } .cmdslot .c .pic .art { width: 13px; height: 13px; }
+.cmdslot.battlefield { border-style: solid; border-color: var(--brass); background: rgba(214,171,85,.12); }
+.cmdslot.battlefield .cl, .cmdslot.battlefield .cmdname { color: var(--brass); }
+.cmdslot .cmdname { font-size: 11px; color: var(--muted); white-space: nowrap; max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+.cmdslot:not(.command) .cl { writing-mode: horizontal-tb; transform: none; }
+.c.cmd { box-shadow: 0 0 0 1px var(--brass); }
+.c.cmd::after { color: var(--brass); }
+.lu { color: #9fe0b2; }
+.pos { font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .center { order: -1; max-height: 300px; }
+  .seats-host { display: contents; }
+}
+@media (min-width: 761px) {
+  .table { grid-template-columns: minmax(0, 1fr) minmax(240px, 22%) minmax(0, 1fr); }
+  .seat.pos0 { grid-area: 1 / 1; } .seat.pos1 { grid-area: 1 / 3; } .seat.pos2 { grid-area: 2 / 3; } .seat.pos3 { grid-area: 2 / 1; }
+  .center { grid-area: 1 / 2 / 3 / 3; max-height: calc(100vh - 80px); }
+  /* two players left: the table becomes a duel, each side gets a full column */
+  .table.duel .seat.dead { display: none; }
+  .table.duel .seat:not(.dead) { grid-row: 1 / 3; }
+  .table.duel .seat.duelL { grid-column: 1; }
+  .table.duel .seat.duelR { grid-column: 3; }
+  .table.duel .c { width: 82px; min-height: 90px; }
+  .table.duel .c .pic { height: 30px; } .table.duel .c .pic .art { width: 26px; height: 26px; }
+  .table.duel .c .n { font-size: 11px; }
+  .table.three .seat.dead .seat-body { display: none; }
+}
+@media (min-width: 1000px) and (min-height: 560px) {
+  .main { display: flex; flex: 1; min-height: 0; }
+  .table { flex: 1; height: 100%; }
+  .center { max-height: none; }
+}
