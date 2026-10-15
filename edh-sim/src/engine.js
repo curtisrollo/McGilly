@@ -898,6 +898,8 @@
       this.nnSeats = opts.nnSeats || null;          // which seats let it steer their choices (default: all)
       this.collect = !!opts.collect;                // record training samples (state, card) for train.mjs
       this.explore = opts.explore || 0;             // random noise on choices while training, so the net sees variety
+      this.lookahead = opts.lookahead !== false;    // try the best few plays on a copy of the game before choosing (see lookPick)
+      this.lookSeats = opts.lookSeats || null;      // which seats search (default: all)
       this.samples = []; this.mullSamples = [];
     }
 
@@ -953,7 +955,13 @@
     }
     nnSample(p, c, from) { return { seat: p.seat, deck: p.deckId, name: c.name, from, st: this.nnState(p), card: this.nnCard(p, c, from), turn: this.round }; }
     nnOn(p) { return !!this.nn && (!this.nnSeats || this.nnSeats.includes(p.seat)); }
+    // the board summary is the same for every card scored in one decision (a tutor rates the whole library), so it is cached until the next event
     nnState(p) {
+      const key = p.seat + ':' + this._nnTick;
+      if (this._nnS && this._nnS.key === key) return this._nnS.v;
+      const v = this._nnState(p); this._nnS = { key, v }; return v;
+    }
+    _nnState(p) {
       const opps = this.opps(p);
       const crs = (q) => q.bf.filter((c) => c.info.isCreature);
       const pow = (q) => crs(q).reduce((s2, c) => s2 + Math.max(0, this.power(c)), 0);
@@ -1088,8 +1096,9 @@
     alive() { return this.players.filter((p) => !p.lost); }
     opps(p) { return this.players.filter((q) => q !== p && !q.lost); }
     allBf() { return this.players.flatMap((p) => p.bf); }
-    statics(p, k) { return p.bf.flatMap((c) => (c.info.statics || []).filter((s) => s.k === k).map((s) => ({ s, c }))); }
-    has(p, k) { return this.statics(p, k).length > 0; }
+    // called constantly (every power/toughness/keyword check), so plain loops without allocations
+    statics(p, k) { const out = []; for (const c of p.bf) { const ss = c.info.statics; if (ss) for (const s of ss) if (s.k === k) out.push({ s, c }); } return out; }
+    has(p, k) { for (const c of p.bf) { const ss = c.info.statics; if (ss) for (const s of ss) if (s.k === k) return true; } return false; }
 
     hasKw(c, k) { return this.kws(c).has(k); }
     kws(c) {
@@ -2991,7 +3000,22 @@
       const need = p.colors.filter((x) => !this.sources(p).some((s) => s.opts.some((o) => o.colors.includes(x))) && !p.bf.some((b) => b.info.mana && b.info.mana.opts.some((o) => o.colors.includes(x))));
       let v = [...cols].filter((x) => p.colors.includes(x)).length + need.filter((x) => cols.has(x)).length * 3;
       if (c.info.etbTapped) v -= 1.5;
-      return v;
+      return v + this.landSynergy(p, c);
+    }
+    // Cabal Coffers and Urborg: each is worth far more with the other (Urborg makes every land a Swamp for Coffers)
+    landSynergy(p, c) {
+      const lands = p.bf.filter((x) => x.info.isLand && x !== c);
+      const coffersOut = lands.some((x) => x.info.coffers), urborgOut = lands.some((x) => x.info.addsLandType === 'Swamp');
+      const known = (pred) => p.hand.some(pred) || p.library.some(pred);
+      if (c.info.coffers) {
+        const swamps = urborgOut ? lands.length + 1 : lands.filter((x) => this.landTypes(p, x).includes('Swamp')).length;
+        return Math.max(0, swamps - 2) * 1.2 + (!urborgOut && known((x) => x.info.addsLandType === 'Swamp') ? 2 : 0);
+      }
+      if (c.info.addsLandType === 'Swamp') {
+        const nonSwamps = lands.filter((x) => !this.landTypes(p, x).includes('Swamp')).length;
+        return coffersOut ? 4 + nonSwamps * 1.2 : known((x) => x.info.coffers) ? 3 : 0;
+      }
+      return 0;
     }
     // Which land to play this turn: try each one and see what it lets us cast right now. A land that enters
     // tapped is best played on a turn when the extra mana wouldn't be used anyway; colours the hand is missing count.
@@ -3023,7 +3047,7 @@
     bestLandFrom(p, lands) { return lands.slice().sort((a, b) => this.landValue(p, b) - this.landValue(p, a))[0]; }
     cardValue(p, c) {
       const i = c.info;
-      if (i.isLand) return 1;
+      if (i.isLand) return 1 + this.landSynergy(p, c);
       let v = i.mv;
       if (i.isCreature) v += (i.power || 0) + (i.toughness || 0) * 0.5;
       if (i.spell.some((f) => f.k === 'wipe')) v += 8;
@@ -3173,6 +3197,15 @@
       return cost;
     }
 
+    // an effect's count for scoring: counts can be words (X, LANDS for "one per land you control", TRIBE, X2), and a word times a number is NaN, which silently hid the card from the AI
+    fxNum(p, n, xGuess = 2) {
+      if (typeof n === 'number') return n;
+      if (n == null) return 1;
+      if (n === 'LANDS') return p.bf.filter((c) => c.info.isLand).length;
+      if (n === 'TRIBE') return Math.max(1, p.bf.filter((c) => c.info.isCreature).length - 1);
+      if (n === 'X2') return xGuess * 2;
+      return /^\d+$/.test(n) ? +n : xGuess;
+    }
     scoreCast(p, c, from) {
       const i = c.info;
       const turnN = this.round;
@@ -3192,10 +3225,10 @@
       const fx = i.isPermanent ? i.etb : i.spell;
       for (const f of fx) {
         if (f.k === 'ramp') s += 28 - turnN * 2;
-        if (f.k === 'draw') s += 6 + (f.n === 'X' ? 3 : f.n * 3) + (p.hand.length < 3 ? 8 : 0);
+        if (f.k === 'draw') s += 6 + this.fxNum(p, f.n, 1) * 3 + (p.hand.length < 3 ? 8 : 0);
         if (f.k === 'wheel') s += p.hand.length < 3 ? 25 : -20;
         if (f.k === 'tutor' || f.k === 'tutorBF') s += 14;
-        if (f.k === 'tokens') s += 6 + (f.n === 'X' ? 6 : f.n * 2);
+        if (f.k === 'tokens') s += 6 + this.fxNum(p, f.n, 3) * 2;
         if (f.k === 'treasure') s += 4;
         if (f.k === 'removal' || f.k === 'steal') {
           const pred = f.what === 'creature' ? (x) => x.info.isCreature : (x) => !x.info.isLand;
@@ -3231,7 +3264,7 @@
         if (f.k === 'regrow') { if (!p.gy.some((x) => !x.info.isLand)) s -= 3; else s += 6; }
         if (f.k === 'overrun') { const n = p.bf.filter((x) => x.info.isCreature && !x.sick).length; if (n < 3 && i.isInstant) return -1; s += n * 3; }
         if (f.k === 'extraTurn') s += 20;
-        if (f.k === 'dig') s += 6 + f.n * 0.5;
+        if (f.k === 'dig') s += 6 + this.fxNum(p, f.n, 3) * 0.5;
         if (f.k === 'search') s += f.dest === 'bf' ? 16 : f.dest === 'hand' ? 10 : (p.hand.concat(p.bf).some((x) => x.info.spell.concat(x.info.etb).some((y) => y.k === 'reanimate')) || this.has(p, 'muldrotha') ? 10 : 2);
         if (f.k === 'mill') s += this.has(p, 'muldrotha') || p.bf.some((x) => x.info.sidisi) ? 4 : 0;
         if (f.k === 'edictAll') { const theirs = opp.reduce((a, q) => a + q.bf.filter((x) => x.info.isCreature).length, 0); const mine2 = p.bf.filter((x) => x.info.isCreature && this.creatureValue(x) > 5).length; s += theirs > mine2 * 2 ? 10 : -10; }
@@ -3755,6 +3788,61 @@
       }
     }
 
+    // ----- look-ahead -----
+    // A copy of the game to try a line on. Card data (info) is shared, everything that changes is copied. Hidden
+    // information stays hidden: every library is reshuffled in the copy, so the search can't peek at draws.
+    cloneForLook() {
+      const seen = new Map(), skip = new Set(['info', 'baseInfo', 'db', '_ac', 'nn', 'R', 'events', 'samples', 'mullSamples', 'emit', 'stats', '_crBuf']);
+      const cp = (v, key) => {
+        if (v === null || typeof v !== 'object' || skip.has(key)) return v;
+        if (seen.has(v)) return seen.get(v);
+        let o;
+        if (Array.isArray(v)) { o = []; seen.set(v, o); for (const x of v) o.push(cp(x)); return o; }
+        if (v instanceof Set) { o = new Set(); seen.set(v, o); for (const x of v) o.add(cp(x)); return o; }
+        if (v instanceof Map) { o = new Map(); seen.set(v, o); for (const [k, x] of v) o.set(k, cp(x)); return o; }
+        o = {}; seen.set(v, o); for (const k of Object.keys(v)) o[k] = cp(v[k], k); return o;
+      };
+      const g = Object.create(Object.getPrototypeOf(this));
+      for (const k of Object.keys(this)) g[k] = skip.has(k) ? this[k] : cp(this[k], k);
+      this._lookN = (this._lookN || 0) + 1;
+      g.R = rng((this.seed * 7919 + this._lookN * 104729) >>> 0); g.events = []; g.stats = {}; g._crBuf = []; g.samples = []; g.mullSamples = []; g.record = false; g.collect = false; g.explore = 0; g._inLook = true;
+      for (const q of g.players) g.R.shuffle(q.library);
+      return g;
+    }
+    // How good the position is for p at the end of the line: winning, knocking players out, life taken, board, cards
+    lookValue(g, seat) {
+      const p = g.players[seat];
+      if (g.winner === seat) return 1000;
+      if (p.lost || (g.over && g.winner !== seat)) return -1000;
+      const opps = g.opps(p);
+      let v = (g.players.length - 1 - opps.length) * 60 + opps.reduce((a, q) => a + Math.min(40, 40 - q.life) * 0.5 + q.poison * 3 - g.playerThreat(q) * 0.15, 0);
+      v += g.playerThreat(p) * 0.6 + p.hand.length * 1.5 + (p.infMana ? 25 : 0) + Math.min(p.life, 40) * 0.2;
+      if (g.nnOn(p)) v += 80 * g.nnV(p);
+      return v;
+    }
+    // Try each candidate play on a copy, finish the main phase greedily, and compare. Returns the better pick, or null to keep the greedy one.
+    lookPick(p, second, options, abs, greedy) {
+      const cands = [greedy], gs = (greedy.o || greedy.ab).s, close = (x) => x.s >= gs * 0.35;
+      for (const o of options.slice(0, 3)) if ((!greedy.o || o.c.id !== greedy.o.c.id) && close(o)) cands.push({ o });
+      for (const a of abs.slice(0, 2)) if ((!greedy.ab || a.key !== greedy.ab.key) && close(a)) cands.push({ ab: a });
+      if (cands.length < 2) return null;
+      const res = cands.map((pk) => {
+        try {
+          const g = this.cloneForLook(), pp = g.players[p.seat];
+          const used = g._usedAbilities && g._usedAbilities.turn === g.turn ? g._usedAbilities.set : new Set(); g._usedAbilities = { turn: g.turn, set: used };
+          if (pk.ab) { const a = g.abilityOptions(pp, second, used).find((x) => x.key === pk.ab.key); if (!a) return -Infinity; used.add(a.key); g.doActivate(pp, a); }
+          else { const c = g.cards[pk.o.c.id]; if (!c || !g.castSpell(pp, c, pk.o.from, pk.o.gyType)) return -Infinity; g.playLand(pp); }
+          if (!g.over && !pp.lost) g.mainPhase(pp, second);
+          // from the first main phase, play the rest of the turn too: a creature cast now attacks, mana held up isn't wasted
+          if (!second && !g.over && !pp.lost && g.active === p.seat) { g.emptyPools(); g.phase = 'combat'; g.combat(pp); if (!g.over && !pp.lost) { g.emptyPools(); g.phase = 'main 2'; g.mainPhase(pp, true); } }
+          return g.lookValue(g, p.seat);
+        } catch (e) { return -Infinity; }
+      });
+      let bi = 0; for (let i = 1; i < res.length; i++) if (res[i] > res[bi]) bi = i;
+      // only leave the greedy play for a clearly better line
+      return bi > 0 && res[bi] > res[0] + 4 ? cands[bi] : null;
+    }
+
     mainPhase(p, second = false) {
       if (!second && p.drainMana) { this.addFloating(p, 'C', p.drainMana); this.emit('effect', `Mana Drain gives ${p.name} ${p.drainMana} extra mana.`, { seat: p.seat }); p.drainMana = 0; }
       this.playLand(p);
@@ -3767,10 +3855,13 @@
         // a strong activated ability (Osgir copying Wurmcoil, Razaketh tutoring) can beat casting a spell
         const used = this._usedAbilities && this._usedAbilities.turn === this.turn ? this._usedAbilities.set : new Set();
         this._usedAbilities = { turn: this.turn, set: used };
-        const ab = this.abilityOptions(p, second, used)[0];
-        if (ab && (!options.length || ab.s > options[0].s)) { used.add(ab.key); this.doActivate(p, ab); continue; }
-        if (!options.length) break;
-        const o = this.bestSequence(p, options);
+        const abs = this.abilityOptions(p, second, used), ab = abs[0];
+        // look ahead: when there is a real choice, try the best few plays on a copy of the game and keep the one whose turn ends best
+        let pick = ab && (!options.length || ab.s > options[0].s) ? { ab } : options.length ? { o: this.bestSequence(p, options) } : null;
+        if (pick && this.lookahead && !this._inLook && !p.infMana && (!this.lookSeats || this.lookSeats.includes(p.seat))) pick = this.lookPick(p, second, options, abs, pick) || pick;
+        if (!pick) { if (this.beledrosUntap(p)) continue; break; }
+        if (pick.ab) { used.add(pick.ab.key); this.doActivate(p, pick.ab); continue; }
+        const o = pick.o;
         if (!this.castSpell(p, o.c, o.from, o.gyType)) break;
         this.playLand(p);
       }
@@ -3964,9 +4055,9 @@
           const best = p.gy.filter((x) => x.info.types.has('Artifact') && x.info.isPermanent && x.info.mv <= avail && !x.info.cost.x).sort((a, b) => val(b) - val(a))[0];
           s += best ? 8 + val(best) * 2 : -20;
         }
-        else if (f.k === 'draw') s += 5 + (f.n || 1) * 3;
+        else if (f.k === 'draw') s += 5 + this.fxNum(p, f.n, 1) * 3;
         else if (f.k === 'removal' || f.k === 'steal') s += 12;
-        else if (f.k === 'tokens') s += 5 + (f.n || 1) * 2;
+        else if (f.k === 'tokens') s += 5 + this.fxNum(p, f.n, 3) * 2;
         else if (f.k === 'damage' || f.k === 'drain' || f.k === 'drainOne') s += 5;
         else if (f.k === 'discard') {
           s += 4;
@@ -4076,30 +4167,30 @@
       return n > 0;
     }
 
+    // Beledros: pay 10 life to untap every land, when that unlocks a big play the AI wants (and the life is safe to pay)
+    beledrosUntap(p) {
+      const bel = p.bf.find((c) => c.info.beledros);
+      if (!bel || bel.usedTurn === this.turn || p.life < 20 || !this.canPayLife(p, 10)) return false;
+      const tappedLands = p.bf.filter((c) => c.info.isLand && c.tapped);
+      if (tappedLands.length < 3) return false;
+      const before = new Set(this.castOptions(p).map((o) => o.c.id));
+      for (const c of tappedLands) c.tapped = false;
+      // 10 life is a lot: only for a 4+ mana spell that scores well, never for a cheap creature
+      const unlocked = this.castOptions(p).filter((o) => !before.has(o.c.id) && o.s >= 15 && (o.c.info.cost.x ? this.availableMana(p) : this.costFor(p, o.c, o.from).mv || 0) >= 4);
+      for (const c of tappedLands) c.tapped = true;
+      if (!unlocked.length) return false;
+      bel.usedTurn = this.turn;
+      this.emit('ability', `${p.name} pays 10 life: Beledros untaps ${tappedLands.length} lands to cast ${unlocked[0].c.info.name}.`, { seat: p.seat, cards: [bel.id] });
+      this.loseLife(p, 10); this.checkState();
+      if (this.over || p.lost) return false;
+      for (const c of tappedLands) c.tapped = false;
+      return true;
+    }
     // Post-combat uses of leftover resources
     lateGameMana(p) {
       if (this.over || p.lost) return;
       // Beledros: pay 10 life to untap lands when there is something big to cast
-      const bel = p.bf.find((c) => c.info.beledros);
-      if (bel && bel.usedTurn !== this.turn && p.life >= 30 && this.canPayLife(p, 10)) {
-        // only pay the 10 life if untapping actually unlocks a play the AI wants and can now afford
-        const tappedLands = p.bf.filter((c) => c.info.isLand && c.tapped);
-        const before = new Set(this.castOptions(p).map((o) => o.c.id));
-        for (const c of tappedLands) c.tapped = false;
-        // 10 life is a lot: only for a big play (a 4+ mana spell that scores well), never for a cheap creature
-        const unlocked = this.castOptions(p).filter((o) => !before.has(o.c.id) && o.s >= 30 && (o.c.info.cost.mv || 0) >= 4);
-        for (const c of tappedLands) c.tapped = true;
-        if (tappedLands.length >= 3 && unlocked.length) {
-          bel.usedTurn = this.turn;
-          this.emit('ability', `${p.name} pays 10 life: Beledros untaps ${tappedLands.length} lands to cast ${unlocked[0].c.info.name}.`, { seat: p.seat, cards: [bel.id] });
-          this.loseLife(p, 10); this.checkState();
-          if (this.over || p.lost) return;
-          for (const c of tappedLands) c.tapped = false;
-          const o = unlocked[0];
-          if (o.c.zone === (o.from === 'command' ? 'command' : o.from === 'gy' ? 'gy' : 'hand') || o.from === 'citadel' || o.from === 'top') this.castSpell(p, o.c, o.from, o.gyType);
-          this.mainPhase(p, 'again');
-        }
-      }
+      if (this.beledrosUntap(p)) this.mainPhase(p, 'again');
       // Infinity stones: harness when there's mana to spare
       for (const c of p.bf) if (c.info.harness && !c.harnessed) {
         const cost = parseCost(c.info.harness.cost);

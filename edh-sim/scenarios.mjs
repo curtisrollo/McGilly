@@ -7,6 +7,7 @@ import muldrotha from './scenarios/muldrotha.mjs';
 import osgir from './scenarios/osgir.mjs';
 import myrkul from './scenarios/myrkul.mjs';
 import atraxa from './scenarios/atraxa.mjs';
+import beledros from './scenarios/beledros.mjs';
 const core = [
   {
     card: 'Doubling Season', title: 'counters are doubled, not quadrupled',
@@ -772,7 +773,7 @@ const core = [
     card: 'Osgir, the Reconstructor', title: 'copies two Hedron Archives (+4 mana) rather than leaving them in the graveyard',
     wrong: 'the copies were valued below an ordinary spell, so the ability often went unused',
     run({ table, put, card }) {
-      const g = table(); const me = g.players[0]; put(g, me, 'Osgir, the Reconstructor'); card(g, me, 'Hedron Archive', 'gy'); card(g, me, 'Birds of Paradise', 'hand');
+      const g = table(); const me = g.players[0]; me.command = []; put(g, me, 'Osgir, the Reconstructor'); card(g, me, 'Hedron Archive', 'gy'); card(g, me, 'Birds of Paradise', 'hand');
       for (const c of me.bf.filter((x) => x.info.isLand).slice(5)) g.removeFrom(me.bf, c);
       g.mainPhase(me);
       const copies = me.bf.filter((c) => c.token && c.name === 'Hedron Archive').length;
@@ -790,4 +791,4 @@ const core = [
     },
   },
 ];
-export default [...core, ...muldrotha, ...osgir, ...myrkul, ...atraxa];
+export default [...core, ...muldrotha, ...osgir, ...myrkul, ...atraxa, ...beledros];
