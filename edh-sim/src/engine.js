@@ -1019,7 +1019,7 @@
         landsPlayed: 0, cardsDrawn: 0, protectedUntil: -1, necroBank: 0, gyCastTypes: new Set(), lostReason: null,
       };
       p.commanderCard = this.makeCard(deck.commander, p, true);
-      p.command.push(p.commanderCard);
+      p.command.push(p.commanderCard); p.commanderCard.zone = 'command';
       for (const c of deck.cards) {
         if (!this.db[c.name]) continue;
         for (let i = 0; i < c.qty; i++) p.library.push(this.makeCard(c.name, p, false));
@@ -1239,6 +1239,7 @@
     leaveBattlefield(c) {
       const ctrl = this.P(c.ctrl);
       const i = ctrl.bf.indexOf(c); if (i >= 0) ctrl.bf.splice(i, 1);
+      c.zone = 'leaving'; // so what it sets off on the way out (an Animate Dead falling off) can't move it a second time
       // drop attachments
       for (const pl of this.players) for (const a of [...pl.bf]) {
         if (a.attached === c.id) {
@@ -2952,6 +2953,8 @@
             for (const x of ctrl.bf) if (x.info.pwDiesDig) this.resolveEffect(ctrl, { k: 'dig', n: 7, types: ['planeswalker'] }, x, 0, false);
           }
         }
+        // equipment attached to something that is no longer a creature becomes unattached
+        for (const c of this.allBf()) if (c.info.isEquipment && c.attached) { const t = this.cards[c.attached]; if (!t || t.zone !== 'bf' || !t.info.isCreature) { c.attached = null; } }
         // legend rule
         for (const q of this.alive()) {
           const seen = {};
@@ -2979,10 +2982,10 @@
       if (cmd && ok(cmd)) out.push({ c: cmd, from: 'command' });
       const top = p.library[0];
       if (top && !top.info.isLand && ok(top)) {
-        if (p.bf.some((x) => x.info.citadel) && this.canPayLife(p, top.info.mv)) out.push({ c: top, from: 'citadel' });
+        if (p.bf.some((x) => x.info.citadel) && !top.info.cost.x && this.canPayLife(p, top.info.mv)) out.push({ c: top, from: 'citadel' });
         else if (this.statics(p, 'castTop').length && (top.info.types.has('Artifact') || top.info.colors.size === 0)) out.push({ c: top, from: 'top' });
       }
-      for (const c of this.players.flatMap((q) => q.exile)) if (c.voidBy === p.seat && c.owner !== p.seat && this.statics(p, 'voidExile').some(({ s: st }) => st.valgavoth) && !c.info.isLand && this.canPayLife(p, c.info.mv)) out.push({ c, from: 'valgavoth' });
+      for (const c of this.players.flatMap((q) => q.exile)) if (c.voidBy === p.seat && c.owner !== p.seat && this.statics(p, 'voidExile').some(({ s: st }) => st.valgavoth) && !c.info.isLand && !c.info.cost.x && this.canPayLife(p, c.info.mv)) out.push({ c, from: 'valgavoth' });
       if (this.has(p, 'muldrotha')) {
         for (const c of p.gy) if (c.info.isPermanent && !c.info.isLand) {
           const types = ['Creature', 'Artifact', 'Enchantment', 'Planeswalker'].filter((t) => c.info.types.has(t) && !p.gyCastTypes.has(t));
@@ -3127,7 +3130,8 @@
       const sample = this.collect ? this.nnSample(p, c, from) : null;
       let cost = this.costFor(p, c, from);
       let xVal = 0;
-      if (cost.x) { xVal = this.maxX(p, cost); if (xVal < 0) return false; }
+      if (p.lost || this.over) return false; // a player who has lost takes no more actions
+      if (cost.x) { xVal = this.maxX(p, cost); if (xVal < this.minX(c)) return false; }
       if (from === 'prepared') {
         if (!this.pay(p, cost, 0, true)) return false;
         c.prepared = false;
@@ -3147,6 +3151,8 @@
       if (overload && this.opps(p).some((q) => this.playerThreat(q) > 20)) cost = i.overload;
       const colorsSpent = new Set(this.sources(p).flatMap((x) => x.opts.flatMap((o) => o.colors))).size;
       if (!this.pay(p, cost, xVal, true)) return false;
+      // paying can set things off (Mana Confluence's life loss into an Exquisite Blood loop) that end the game
+      if (p.lost || this.over) return true;
       let kicks = 0;
       if (i.multikicker) while (kicks < 4 && this.pay(p, parseCost(String(i.multikicker)))) { this.pay(p, parseCost(String(i.multikicker)), 0, true); kicks++; }
       if (from === 'hand') this.removeFrom(p.hand, c);
@@ -3544,6 +3550,7 @@
     }
 
     playLand(p) {
+      if (p.lost || this.over) return;
       const allowed = 1 + this.statics(p, 'extraLand').reduce((s, x) => s + x.s.n, 0);
       while (p.landsPlayed < allowed) {
         const lands = p.hand.filter((c) => c.info.isLand);
@@ -3628,7 +3635,7 @@
     castOptions(p) {
       this._nnTick = (this._nnTick || 0) + 1;
       return this.castables(p).map((o) => ({ ...o, s: this.scoreCast(p, o.c, o.from) })).map((o) => (this.explore && o.s > 0 ? { ...o, s: o.s + this.R() * this.explore } : o)).filter((o) => o.s > 0)
-        .filter((o) => this.pay(p, this.costFor(p, o.c, o.from)) && (!o.c.info.cost.x || this.maxX(p, o.c.info.cost) >= this.minX(o.c)))
+        .filter((o) => { const cf = this.costFor(p, o.c, o.from); return this.pay(p, cf) && (!o.c.info.cost.x || (cf.x && this.maxX(p, cf) >= this.minX(o.c))); })
         .sort((a, b) => b.s - a.s);
     }
 
@@ -3780,6 +3787,7 @@
     }
     doActivate(p, prep) {
       const { c, ab, fodder, cost } = prep;
+      if (p.lost || this.over) return;
       if (ab.untapWithCounter && ab.tap && c.tapped) { if (c.info.isCreature) c.p1 -= 1; c.tapped = false; this.emit('ability', `${this.cname(c)} gets a -1/-1 counter and untaps.`, { seat: p.seat, cards: [c.id] }); this.checkState(); if (c.zone !== 'bf') return; }
       if (cost.mv) this.pay(p, cost, 0, true);
       if (ab.tap) c.tapped = true;
@@ -3905,7 +3913,7 @@
       }
       for (const c of p.bf) if (c.info.saga && c.sagaConstructs && !c.tapped && this.pay(p, parseCost('2'))) { this.pay(p, parseCost('2'), 0, true); c.tapped = true; this.addToken(p, { p: 0, t: 0, sub: 'Construct', colors: 'colorless' }, 1, false); }
       // Cycling extra lands
-      for (const c of [...p.hand]) if (c.info.cycling && p.hand.filter((x) => x.info.isLand).length > 2 && this.pay(p, c.info.cycling)) {
+      for (const c of [...p.hand]) if (!p.lost && !this.over && c.info.cycling && p.hand.filter((x) => x.info.isLand).length > 2 && this.pay(p, c.info.cycling)) {
         this.pay(p, c.info.cycling, 0, true); this.discardCard(p, c); this.draw(p, 1);
         this.emit('ability', `${p.name} cycles ${c.info.name}.`, { seat: p.seat, cards: [c.id] });
       }
@@ -3936,6 +3944,7 @@
     }
 
     walkerOnce(p, c) {
+      if (p.lost || this.over) return false;
       const abs = c.info.loyaltyAbs;
       if (!abs.length) return false;
       const carth = this.has(p, 'carth') ? 1 : 0;
@@ -4042,6 +4051,7 @@
     }
 
     combat(p) {
+      if (p.lost || this.over) return;
       let cands = p.bf.filter((c) => this.canAttack(c));
       if (!cands.length) return;
       const q = this.chooseDefender(p, cands);
