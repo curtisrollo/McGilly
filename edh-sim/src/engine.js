@@ -1269,10 +1269,10 @@
       if (c.info.isLand) { if (this._landBatch) this._landBatch.add(owner.seat); else for (const x of owner.bf) for (const t of x.info.triggers) if (t.k === 'landToGy') this.resolveEffects(owner, t.fx, x, null, false); }
     }
     discardCard(p, c) { this.removeFrom(p.hand, c); if (this.has(p, 'necro')) { c.zone = 'exile'; p.exile.push(c); return; } this.toGraveyard(c); }
-    discardWorst(p, n = 1) {
+    discardWorst(p, n = 1, keepLands = false) {
       // discarding several cards is one event: "one or more land cards" (The Gitrog Monster) triggers once
       const batch = !this._landBatch; if (batch) this._landBatch = new Set();
-      for (let i = 0; i < n && p.hand.length; i++) { const d = p.hand.slice().sort((a, b) => this.cardValue(p, a) + this.nnAdv(p, a) * 40 - this.cardValue(p, b) - this.nnAdv(p, b) * 40)[0]; this.discardCard(p, d); }
+      for (let i = 0; i < n && p.hand.length; i++) { const pool = keepLands && p.hand.some((c) => !c.info.isLand) ? p.hand.filter((c) => !c.info.isLand) : p.hand; const d = pool.slice().sort((a, b) => this.cardValue(p, a) + this.nnAdv(p, a) * 40 - this.cardValue(p, b) - this.nnAdv(p, b) * 40)[0]; this.discardCard(p, d); }
       if (batch) { const seats = this._landBatch; this._landBatch = null; for (const s2 of seats) { const q = this.P(s2); for (const x of q.bf) for (const t of x.info.triggers) if (t.k === 'landToGy') this.resolveEffects(q, t.fx, x, null, false); } }
     }
     mill(p, n) {
@@ -1480,7 +1480,8 @@
       if (bonds.length && trig.some((x) => x.t.k === 'exquisite')) {
         // Sanguine Bond + Exquisite Blood style loop: every opponent drains out
         const names = [...new Set(bonds.concat(trig.filter((x) => x.t.k === 'exquisite')).map((x) => x.c.info.name))].join(' + ');
-        this.emit('combo', `${names}: ${p.name} goes infinite and drains the table!`, { seat: p.seat, cards: trig.map((x) => x.c.id) });
+        if (p.drainTurn !== this.turn) this.emit('combo', `${names}: ${p.name} goes infinite and drains the table!`, { seat: p.seat, cards: trig.map((x) => x.c.id) }); // (once a turn: a Platinum Angel or Teferi's Protection can leave someone standing)
+        p.drainTurn = this.turn;
         for (const q of this.opps(p)) if (q.protectedUntil < this.turn) q.life = 0;
         this.checkState();
         return;
@@ -1683,6 +1684,18 @@
         .sort((a, b) => this.creatureValue(a) - this.creatureValue(b));
     }
     // Sacrifice the board when the death triggers add up to lethal
+    // Cards p would draw if its creature c died now: Liliana, Dreadhorde General and other "whenever a creature you control dies, draw", Skullclamp, c's own dies-draw
+    deathDraws(p, c) {
+      const dn = (fx) => (fx || []).reduce((a, f) => a + (f.k === 'draw' ? this.fxNum(p, f.n, 1) : 0), 0);
+      let n = dn(c.info.dies);
+      for (const s2 of p.bf) {
+        for (const w of s2.info.deathWatch || []) if ((w.scope === 'mine' || w.scope === 'any') && (!w.nontoken || !c.token) && (s2 !== c || w.orSelf)) n += dn(w.fx);
+        if (s2.attached === c.id) n += dn(s2.info.equipDies);
+      }
+      return n;
+    }
+    // How many more cards p can draw this turn without decking (leaving one for the next draw step); unlimited with Jace or Platinum Angel out
+    drawRoom(p) { return this.has(p, 'labman') || this.has(p, 'platinum') ? Infinity : p.library.length - 2; }
     aristocrats(p) {
       const outlets = this.sacOutlets(p);
       if (!outlets.length) return;
@@ -1694,10 +1707,13 @@
       const perOpp = (per / Math.max(1, this.opps(p).length)) * (1 + loops);
       const weakest = Math.min(...this.opps(p).map((q) => q.life));
       if (fod.length * perOpp < weakest) return;
-      let n = 0;
+      let n = 0, drawn = 0;
       for (const c of fod) {
         if (this.over || p.lost) break;
         const o = this.sacOutlets(p).find((x) => x !== c);
+        const d = o ? this.deathDraws(p, c) + (o.info.sacOutlet.fx || []).reduce((a, f) => a + (f.k === 'draw' ? this.fxNum(p, f.n, 1) : 0), 0) : 0;
+        if (d && drawn + d > this.drawRoom(p) + drawn) break; // these deaths draw cards: stop before the library runs out
+        drawn += d;
         if (!o || !this.sacrifice(p, c, o)) break;
         n++;
         this.checkState();
@@ -1718,6 +1734,7 @@
       let n = 0;
       for (const c of q.bf.filter((x) => x.info.isCreature && x !== o && !this.hasKw(x, 'indestructible') && !x.isCommander)) {
         const out = this.sacOutlets(q).find((x) => x !== c);
+        if (this.deathDraws(q, c) + (out ? (out.info.sacOutlet.fx || []).filter((f) => f.k === 'draw').length : 0) > this.drawRoom(q)) break;
         if (!out || !this.sacrifice(q, c, out)) break;
         n++;
       }
@@ -3830,7 +3847,9 @@
       if (p.necroPending && p.necroPending.length) { for (const c of p.necroPending) { c.zone = 'hand'; p.hand.push(c); } p.necroPending = []; }
       // cleanup
       const max = this.has(p, 'noMaxHand') || (p.emblems || []).includes('tamiyo') ? 99 : 7;
-      for (let i = 0; i < 6 && p.hand.length > max; i++) this.discardWorst(p, p.hand.length - max); // (a discard can draw: The Gitrog Monster; cleanup repeats)
+      // a discarded land can draw a card (The Gitrog Monster) and cleanup repeats: after the first pass, discard spells so it ends at seven
+      const landDraws = p.bf.some((x) => x.info.triggers.some((t) => t.k === 'landToGy'));
+      for (let i = 0; i < 8 && p.hand.length > max; i++) this.discardWorst(p, p.hand.length - max, landDraws && i > 0);
       for (const c of this.allBf()) {
         c.dmg = 0; c.dt = false; c.eot = { p: 0, t: 0, kw: [] }; c.indestructibleEOT = false; c.hexproofEOT = false; c.noBlock = false;
         if (c.animatedEOT) { c.animatedEOT = false; this.restoreInfo(c); }
@@ -3910,7 +3929,7 @@
         o = {}; seen.set(v, o); for (const k of Object.keys(v)) o[k] = cp(v[k], k); return o;
       };
       const g = Object.create(Object.getPrototypeOf(this));
-      for (const k of Object.keys(this)) g[k] = skip.has(k) ? this[k] : cp(this[k], k);
+      for (const k of Object.keys(this)) if (k !== 'emit') g[k] = skip.has(k) ? this[k] : cp(this[k], k); // (an emit wrapped around the real game, by a monitor or the UI, must not see the copy's moves)
       this._lookN = (this._lookN || 0) + 1;
       g.R = rng((this.seed * 7919 + this._lookN * 104729) >>> 0); g.events = []; g.stats = {}; g._crBuf = []; g.samples = []; g.mullSamples = []; g.record = false; g.collect = false; g.explore = 0; g._inLook = true;
       for (const q of g.players) g.R.shuffle(q.library);
@@ -4247,6 +4266,9 @@
       s -= (ab.life || 0) * 0.4 + (cost.mv || 0) * 0.5 + (ab.discard || 0) * 3;
       // sacrificing the card itself costs what it's worth on the battlefield (a mana rock early on is worth a lot)
       if (ab.sac) s -= Math.max(3, this.permValue(c)) + (c.info.mana ? Math.max(0, 14 - this.round) : 0);
+      // never into an empty library: the ability's draws plus what the sacrificed creatures draw on the way out
+      const draws = ab.fx.reduce((a, f) => a + (f.k === 'draw' ? this.fxNum(p, f.n, 1) : 0), 0) + fodder.reduce((a, x) => a + (x.info.isCreature ? this.deathDraws(p, x) : 0), 0) + (ab.sac && c.info.isCreature ? this.deathDraws(p, c) : 0);
+      if (draws && draws > this.drawRoom(p)) return -1;
       return s;
     }
     doActivate(p, prep) {
@@ -4448,7 +4470,7 @@
           else if (f.k === 'darettiWeld') { const fod = p.bf.some((x) => x.info.types.has('Artifact') && !x.isCommander && this.permValue(x) < 5); const best = Math.max(0, ...p.gy.filter((x) => x.info.types.has('Artifact') && x.info.isPermanent).map((x) => this.cardValue(p, x))); s += fod && best >= 6 ? 6 + best : -10; }
           else if (f.k === 'draw' && (f.n || 1) >= p.library.length && !this.has(p, 'labman') && !this.has(p, 'platinum')) s -= 60; // drawing out the library loses the game (unless Jace or Platinum Angel turns it around)
           else if (f.k === 'tokens') s += 5; else if (f.k === 'draw') s += 4; else if (f.k === 'drain') s += 4;
-          else if (f.k === 'drawTapped') s += 4.5 * Math.max(0, ...this.alive().map((q) => q.bf.filter((x) => x.info.isCreature && x.tapped).length)); // Tamiyo, the Moon Sage's -2
+          else if (f.k === 'drawTapped') { const n = Math.max(0, ...this.alive().map((q) => q.bf.filter((x) => x.info.isCreature && x.tapped).length)); s += n >= p.library.length && !this.has(p, 'labman') && !this.has(p, 'platinum') ? -60 : 4.5 * n; } // Tamiyo, the Moon Sage's -2 (not into an empty library)
           else if (f.k === 'counters' && f.on === 'each') s += 1.5 * p.bf.filter((x) => x.info.isCreature).length; // Ajani Steadfast's -2, with loyaltyEach below
           else if (f.k === 'tamiyoWatch') s += 1 + 2 * Math.min(2, p.bf.filter((x) => x.info.isCreature && (this.hasKw(x, 'flying') || this.power(x) >= 3)).length);
           else if (f.k === 'loyaltyEach') s += 3 * p.bf.filter((x) => x.info.isPW && (!f.other || x !== c)).length;
@@ -4489,6 +4511,7 @@
           ? (crs.filter((c) => this.toughness(c) <= -shrink && !c.isCommander).sort((a, b) => this.creatureValue(a) - this.creatureValue(b))[0] || null)
           : crs.sort((a, b) => this.creatureValue(b) - this.creatureValue(a))[0];
         if (!best || eq.attached === best.id) continue;
+        if (shrink < 0 && (eq.info.equipDies || []).length && this.toughness(best) <= -shrink && this.deathDraws(p, best) + 2 > this.drawRoom(p)) continue; // Skullclamp draws 2: not into an empty library
         if (eq.attached && this.cards[eq.attached] && this.cards[eq.attached].zone === 'bf') continue;
         const cost = eq.info.equip || parseCost('2');
         if (!this.pay(p, cost)) continue;
