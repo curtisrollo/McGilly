@@ -1207,7 +1207,7 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     'Cursed Mirror': (a, cover) => { a.copy = { what: 'creature', any: true, eot: true, haste: true, optional: true }; cover(ALL); },
     'Phantasmal Image': (a, cover) => { a.copy = { what: 'creature', any: true }; cover(ALL); },
     'Spark Double': (a, cover) => { a.copy = { what: 'creaturepw', own: true, plusOne: true, nonLegendary: true }; cover(ALL); },
-    "Sakashima of a Thousand Faces": (a, cover) => { a.copy = { what: 'creature', own: true, keepName: true }; a.statics.push({ k: 'noLegendRule' }); cover(ALL); },
+    "Sakashima of a Thousand Faces": (a, cover) => { a.copy = { what: 'creature', own: true, keepAbilities: true }; a.statics.push({ k: 'noLegendRule' }); cover(ALL); },
     'Sculpting Steel': (a, cover) => { a.copy = { what: 'artifact', any: true }; cover(ALL); },
     'Daretti, Scrap Savant': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'loot', n: 2 }]; a.loyaltyAbs[1].fx = [{ k: 'darettiWeld' }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -10); if (ult) ult.fx = [{ k: 'emblem', e: 'artifactRecursion' }]; cover(ALL); },
     'Dauthi Voidwalker': (a, cover) => { a.kw.add('shadow'); a.statics.push({ k: 'voidExile' }); a.activated = [{ tap: true, sac: true, cost: parseCost(''), fx: [{ k: 'castVoid' }], text: 'Play an exiled card with a void counter for free.' }]; cover(ALL); },
@@ -2088,6 +2088,8 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
       const keep = { copy: null, scripted: true };
       if (cp.nonLegendary) { keep.isLegendary = false; keep.types = new Set([...base.types].filter((t) => t !== 'Legendary')); }
       if (cp.eot) keep.kw = new Set([...base.kw, 'haste']);
+      // "except it has [this card]'s other abilities" (Sakashima): its own statics survive the copy
+      if (cp.keepAbilities) keep.statics = [...(base.statics || []), ...(c.info.statics || [])];
       this.setInfo(c, Object.assign({}, base, keep));
       c.copiedFrom = best.id;
       if (cp.plusOne) c.copyPlusOne = true;
@@ -3677,7 +3679,13 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
         for (const q of this.alive()) {
           const seen = {};
           if (this.has(q, 'noLegendRule')) continue;
-          for (const c of [...q.bf]) if (c.info.isLegendary) { if (seen[c.info.name]) { this.moveToGraveyard(c); changed = true; } else seen[c.info.name] = 1; }
+          const groups = {};
+          for (const c of q.bf) if (c.info.isLegendary) (groups[c.info.name] = groups[c.info.name] || []).push(c);
+          for (const g of Object.values(groups)) if (g.length > 1) {
+            // the controller chooses which one to keep: their commander, else the most valuable
+            const keepC = g.slice().sort((a, b) => (b.isCommander ? 1 : 0) - (a.isCommander ? 1 : 0) || this.permValue(b) - this.permValue(a))[0];
+            for (const c of g) if (c !== keepC) { this.emit('effect', `Legend rule: ${q.name} keeps one ${c.info.name} and puts the other into the graveyard.`, { seat: q.seat, cards: [c.id] }); this.moveToGraveyard(c); changed = true; }
+          }
         }
       }
     }

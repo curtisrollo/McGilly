@@ -775,4 +775,14 @@ export default [
       return { ok: copies === 2 && me.bf.some((c) => c.name === 'Birds of Paradise'), note: `${copies} copies, Birds cast: ${me.bf.some((c) => c.name === 'Birds of Paradise')}` };
     },
   },
+  {
+    card: 'Sakashima of a Thousand Faces', title: 'copying a legend keeps both, because her legend-rule ability survives the copy',
+    wrong: 'the copy wiped her own abilities, so copying Muldrotha made the legend rule kill one of them',
+    run({ table, put, card }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Muldrotha, the Gravetide');
+      const s = card(g, me, 'Sakashima of a Thousand Faces', 'hand'); g.removeFrom(me.hand, s); g.enterBattlefield(s, me, {}); g.checkState();
+      const n = me.bf.filter((c) => c.info.name === 'Muldrotha, the Gravetide').length;
+      return { ok: n === 2 && s.zone === 'bf' && g.has(me, 'noLegendRule'), note: `${n} Muldrothas, Sakashima on battlefield: ${s.zone === 'bf'}` };
+    },
+  },
 ];
