@@ -3679,8 +3679,13 @@
     prepareAbility(p, c, ab, postCombat) {
       const elixir = this.has(p, 'elixir');
       if (c.zone !== 'bf') return null;
-      if (ab.tap && (c.tapped || (c.info.isCreature && c.sick && !this.hasKw(c, 'haste') && !elixir))) return null;
-      if (ab.tap && c.info.isCreature && !postCombat && !ab.preCombat && !this.hasKw(c, 'vigilance') && this.canAttack(c) && !ab.fx.some((f) => f.k === 'osgir')) return null; // creatures prefer to attack first
+      const myrkulOut = p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'));
+      // Cinderhaze Wretch with Myrkul: the discard loop is the point, so it goes before combat instead of attacking
+      const loopNow = ab.untapWithCounter && (myrkulOut || !c.info.isCreature) && this.opps(p).some((q) => q.hand.length);
+      // a tapped Wretch can pay a -1/-1 counter to untap and start
+      const untapByCounter = ab.untapWithCounter && c.tapped && (!c.info.isCreature || myrkulOut || this.toughness(c) > 1);
+      if (ab.tap && ((c.tapped && !untapByCounter) || (c.info.isCreature && c.sick && !this.hasKw(c, 'haste') && !elixir))) return null;
+      if (ab.tap && c.info.isCreature && !postCombat && !ab.preCombat && !loopNow && !this.hasKw(c, 'vigilance') && this.canAttack(c) && !ab.fx.some((f) => f.k === 'osgir')) return null; // creatures prefer to attack first
       if (ab.sorcery && postCombat === undefined) return null;
       if (ab.life && (p.life - ab.life < 10 || !this.canPayLife(p, ab.life))) return null;
       if (ab.sacOther && !ab.sacArtifact && !ab.sacCreature && !ab.sacArtifactN) return null;
@@ -3741,7 +3746,11 @@
         else if (f.k === 'removal' || f.k === 'steal') s += 12;
         else if (f.k === 'tokens') s += 5 + (f.n || 1) * 2;
         else if (f.k === 'damage' || f.k === 'drain' || f.k === 'drainOne') s += 5;
-        else if (f.k === 'discard') s += 4;
+        else if (f.k === 'discard') {
+          s += 4;
+          // the Myrkul loop empties every opponent's hand
+          if (ab.untapWithCounter && (!c.info.isCreature || p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul')))) s += 30 + this.opps(p).reduce((a, q) => a + q.hand.length, 0) * 2;
+        }
         else if (f.k === 'cheatCreature') s += 20;
         else if (f.k === 'feldon' || f.k === 'reanimateArtifact' || f.k === 'weld') s += 14;
         else s += 3;
@@ -3753,6 +3762,7 @@
     }
     doActivate(p, prep) {
       const { c, ab, fodder, cost } = prep;
+      if (ab.untapWithCounter && ab.tap && c.tapped) { if (c.info.isCreature) c.p1 -= 1; c.tapped = false; this.emit('ability', `${this.cname(c)} gets a -1/-1 counter and untaps.`, { seat: p.seat, cards: [c.id] }); this.checkState(); if (c.zone !== 'bf') return; }
       if (cost.mv) this.pay(p, cost, 0, true);
       if (ab.tap) c.tapped = true;
       if (ab.life) this.loseLife(p, ab.life);

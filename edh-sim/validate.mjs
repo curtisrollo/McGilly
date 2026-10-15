@@ -419,6 +419,13 @@ scen('Devoted Druid', 'with Myrkul it dies into an enchantment copy for unlimite
   const x = fin ? +fin.text.match(/X=(\d+)/)[1] : 0;
   return { ok: copy && me.infMana === g.turn && x >= 10, note: `copy ${copy}, unlimited mana ${me.infMana === g.turn}, Finale X=${x}` };
 });
+scen('Cinderhaze Wretch', 'in a normal turn with Myrkul out it loops before combat instead of attacking', () => {
+  const g = table(); const [me] = g.players;
+  put(g, me, 'Myrkul, Lord of Bones'); put(g, me, 'Cinderhaze Wretch');
+  for (const q of g.players.slice(1)) for (let i = 0; i < 4; i++) card(g, q, 'Forest', 'hand');
+  g.mainPhase(me);
+  return { ok: g.players.slice(1).every((q) => q.hand.length === 0), note: `opponents' hands: ${g.players.slice(1).map((q) => q.hand.length).join('/')}` };
+});
 scen('combat', 'a big creature does not attack into an untapped deathtouch blocker', () => {
   const g = table(); const [me, opp] = g.players; const big = put(g, me, 'Craterhoof Behemoth');
   for (const q of g.players.slice(1)) put(g, q, 'Vampire Nighthawk');
