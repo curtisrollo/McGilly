@@ -3514,6 +3514,50 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
     }
 
     // Farewell: pick the modes that hurt opponents more than us
+    // What a wipe would take, without casting it: the permanents each player loses (indestructible ones survive a destroy)
+    wipeHits(p, fx, xVal) {
+      if (fx.what === 'farewell') fx = { ...fx, modes: this.farewellModes(p) };
+      if (fx.what === 'deluge') xVal = this.delugeX(p);
+      const out = [];
+      for (const q of this.alive()) {
+        if (q.protectedUntil >= this.turn) continue;
+        const tribeN = fx.what === 'tribalMinus' ? p.bf.filter((x) => x.info.isCreature && this.isType(x, fx.tribe)).length : 0;
+        for (const c of q.bf) {
+          const cr = c.info.isCreature, tough = cr ? this.toughness(c) - c.dmg : 0;
+          let hit = false;
+          if (fx.what === 'creatures') hit = cr && !(fx.spare && this.isType(c, fx.spare));
+          else if (fx.what === 'farewell') hit = (cr && fx.modes.creatures) || (!c.info.isLand && ((c.info.types.has('Artifact') && fx.modes.artifacts) || (c.info.types.has('Enchantment') && fx.modes.enchantments)));
+          else if (fx.what === 'nonland') hit = !c.info.isLand && !c.info.isPW;
+          else if (fx.what === 'big') hit = cr && this.power(c) >= 4;
+          else if (fx.what === 'minusX' || fx.what === 'deluge') hit = cr && tough <= xVal;
+          else if (fx.what === 'tribalMinus') hit = cr && !this.isType(c, fx.tribe) && tough <= tribeN;
+          else if (fx.what === 'damage') hit = cr && tough <= fx.n;
+          else if (fx.what === 'ugin') hit = !c.info.isLand && c.info.colors && c.info.colors.size > 0 && c.info.mv <= (xVal || 4);
+          else if (fx.what === 'mv2') hit = !c.info.isLand && c.info.mv <= 2;
+          const shrug = fx.what === 'minusX' || fx.what === 'deluge' || fx.what === 'tribalMinus' ? false : !fx.exile && (this.hasKw(c, 'indestructible') || c.indestructibleEOT);
+          if (hit && !shrug) out.push(c);
+        }
+      }
+      return out;
+    }
+    // Is this the moment for the wipe? Weigh what each side loses. Cast it for a real trade (several of their cards, a clearly
+    // bigger loss for them), or when the boards are a danger to us; otherwise hold it for when it matters.
+    wipeEval(p, fx, c, from) {
+      const xVal = c && c.info.cost.x ? this.maxX(p, this.costFor(p, c, from)) : 0;
+      const hits = this.wipeHits(p, fx, xVal);
+      const val = (x) => (x.token ? Math.min(4, this.permValue(x)) : this.permValue(x)) * (x.isCommander ? 0.6 : 1); // a commander comes back (for more tax)
+      let theirs = 0, mine = 0, theirCards = 0;
+      for (const x of hits) { if (x.ctrl === p.seat) mine += val(x) + (x.isCommander ? 4 : 0); else { theirs += val(x); theirCards += x.token ? 0.34 : 1; } }
+      const net = theirs - mine * 1.3;
+      // danger: what the opponents' creatures could swing at us, or one player running away with the game
+      const opps = this.opps(p), pow = (q) => q.bf.filter((x) => x.info.isCreature && !this.pacified(x)).reduce((a, x) => a + Math.max(0, this.power(x)), 0);
+      const swing = opps.reduce((a, q) => a + pow(q), 0), biggest = Math.max(0, ...opps.map(pow));
+      const myBlock = p.bf.filter((x) => x.info.isCreature).length;
+      const danger = biggest >= p.life * 0.6 || swing >= p.life || (biggest >= p.life * 0.4 && myBlock <= 1);
+      const runaway = opps.some((q) => this.playerThreat(q) > this.playerThreat(p) + 45 && hits.some((x) => x.ctrl === q.seat));
+      const cast = net > 0 && ((theirCards >= 3 && net >= 22) || (danger && net >= 6) || (runaway && net >= 15));
+      return { cast, net, theirs, mine, theirCards, danger, hits };
+    }
     farewellModes(p) {
       const val = (pred, q) => q.bf.filter((c) => !c.info.isLand && pred(c)).reduce((s2, c) => s2 + this.permValue(c), 0);
       const modes = {};
@@ -3900,11 +3944,9 @@ input[type=number] { width: 96px; font-family: var(--font-num); }
         if (f.k === 'edict') { if (!opp.some((q) => q.bf.some((x) => x.info.isCreature))) return -1; s += 8; }
         if (f.k === 'wipe') {
           if (f.what === 'lands') { const myLands = p.bf.filter((x) => x.info.isLand).length; const theirs = Math.max(...opp.map((q) => q.bf.filter((x) => x.info.isLand).length)); if (myLands >= theirs || mine < oppMax) return -1; s += 15; continue; }
-          const myBoard = p.bf.filter((x) => x.info.isCreature).reduce((a, x) => a + this.creatureValue(x), 0);
-          const theirBoard = opp.map((q) => q.bf.filter((x) => x.info.isCreature).reduce((a, x) => a + this.creatureValue(x), 0));
-          const worst = Math.max(...theirBoard, 0);
-          if (worst - myBoard < 14 && theirBoard.reduce((a, b) => a + b, 0) - myBoard * 2 < 25) return -1;
-          s += 30;
+          const w = this.wipeEval(p, f, c, from);
+          if (!w.cast) return -1;
+          s += 30 + Math.min(40, w.net * 0.5);
         }
         if (f.k === 'massBounce') { if (oppMax < 25) return -1; s += 20; }
         if (f.k === 'drain') s += 10;

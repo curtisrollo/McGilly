@@ -790,5 +790,45 @@ const core = [
       return { ok: n === 2 && s.zone === 'bf' && g.has(me, 'noLegendRule'), note: `${n} Muldrothas, Sakashima on battlefield: ${s.zone === 'bf'}` };
     },
   },
+  {
+    card: 'Damnation', title: 'held when it would only trade for one creature (no danger to us)',
+    wrong: 'wipes went off as soon as one opponent had one decent creature more than us',
+    run({ table, put, card }) {
+      const g = table(); const [me, a] = g.players; me.command = []; card(g, me, 'Damnation', 'hand'); put(g, a, 'Archangel of Thune');
+      g.mainPhase(me);
+      return { ok: a.bf.some((c) => c.name === 'Archangel of Thune'), note: `Archangel ${a.bf.some((c) => c.name === 'Archangel of Thune') ? 'still there' : 'wiped'}` };
+    },
+  },
+  {
+    card: 'Damnation', title: 'cast when it trades for several of the opponents\' creatures',
+    wrong: '',
+    run({ table, put, card }) {
+      const g = table(); const [me, a, b] = g.players; me.command = []; card(g, me, 'Damnation', 'hand');
+      for (const n of ['Archangel of Thune', 'Vampire Nighthawk']) put(g, a, n); for (const n of ['Craterhoof Behemoth', 'Sheoldred, the Apocalypse']) put(g, b, n);
+      g.mainPhase(me);
+      const left = a.bf.concat(b.bf).filter((c) => c.info.isCreature).length;
+      return { ok: left === 0, note: `${left} opposing creatures left` };
+    },
+  },
+  {
+    card: 'Damnation', title: 'cast when one opponent could swing for lethal-ish damage next turn',
+    wrong: '',
+    run({ table, put, card }) {
+      const g = table(); const [me, a] = g.players; me.command = []; me.life = 12; card(g, me, 'Damnation', 'hand'); put(g, a, 'Craterhoof Behemoth');
+      g.mainPhase(me);
+      return { ok: !a.bf.some((c) => c.name === 'Craterhoof Behemoth'), note: `Craterhoof ${a.bf.some((c) => c.name === 'Craterhoof Behemoth') ? 'still there' : 'wiped'}` };
+    },
+  },
+  {
+    card: 'Damnation', title: "not cast into our own bigger board",
+    wrong: '',
+    run({ table, put, card }) {
+      const g = table(); const [me, a, b] = g.players; me.command = []; card(g, me, 'Damnation', 'hand');
+      for (const n of ['Craterhoof Behemoth', 'Sheoldred, the Apocalypse', 'Archangel of Thune']) put(g, me, n); put(g, a, 'Vampire Nighthawk'); put(g, b, 'Birds of Paradise');
+      g.mainPhase(me);
+      return { ok: me.bf.some((c) => c.name === 'Craterhoof Behemoth'), note: `our board ${me.bf.some((c) => c.name === 'Craterhoof Behemoth') ? 'kept' : 'wiped'}` };
+    },
+  },
 ];
+
 export default [...core, ...muldrotha, ...osgir, ...myrkul, ...atraxa, ...beledros];
