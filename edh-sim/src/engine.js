@@ -2641,7 +2641,8 @@
           const zirda = this.statics(p, 'reduceAbilities').reduce((a, x) => a + x.s.n, 0);
           const costOf = (x) => Math.max(x.info.mv ? 1 : 0, x.info.mv - zirda); // Zirda: abilities cost {2} less (not below one mana)
           const avail = p.infMana === this.turn ? 99 : this.availableMana(p);
-          const c = p.gy.filter((x) => x.info.types.has('Artifact') && costOf(x) <= avail && x.info.isPermanent).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0];
+          const val = (x) => Math.max(this.scoreCast(p, x, 'hand'), this.permValue({ ...x, p1: 0, dmg: 0, eot: { p: 0, t: 0, kw: [] }, ctrl: p.seat, zone: 'bf' }) * 2, this.cardValue(p, x));
+          const c = p.gy.filter((x) => x.info.types.has('Artifact') && costOf(x) <= avail && x.info.isPermanent && !x.info.cost.x).sort((a, b) => val(b) - val(a))[0];
           if (!c) break;
           if (costOf(c)) this.pay(p, parseCost(String(costOf(c))), 0, true);
           this.removeFrom(p.gy, c); c.zone = 'exile'; p.exile.push(c);
@@ -3948,7 +3949,13 @@
       let s = 0;
       for (const f of ab.fx) {
         if (f.k === 'tutor') { const pick = this.chooseTutor(p, f.what || 'card'); s += pick ? 12 + Math.min(25, this.cardValue(p, pick)) + (this.completesCombo(p, pick) ? 40 : 0) : -20; }
-        else if (f.k === 'osgir') { const avail = this.availableMana(p); const best = p.gy.filter((x) => x.info.types.has('Artifact') && x.info.isPermanent && x.info.mv <= avail).sort((a, b) => this.permValue(b) - this.permValue(a))[0]; s += best ? 10 + this.permValue({ ...best, p1: 0, dmg: 0, eot: { p: 0, t: 0, kw: [] }, ctrl: p.seat, zone: 'bf' }) * 2 : -20; }
+        else if (f.k === 'osgir') {
+          // two copies are worth twice what casting that artifact would be (two Hedron Archives = +4 mana a turn)
+          const avail = this.availableMana(p) + (ab.tap ? 0 : 0);
+          const val = (x) => Math.max(this.scoreCast(p, x, 'hand'), this.permValue({ ...x, p1: 0, dmg: 0, eot: { p: 0, t: 0, kw: [] }, ctrl: p.seat, zone: 'bf' }) * 2, 6);
+          const best = p.gy.filter((x) => x.info.types.has('Artifact') && x.info.isPermanent && x.info.mv <= avail && !x.info.cost.x).sort((a, b) => val(b) - val(a))[0];
+          s += best ? 8 + val(best) * 2 : -20;
+        }
         else if (f.k === 'draw') s += 5 + (f.n || 1) * 3;
         else if (f.k === 'removal' || f.k === 'steal') s += 12;
         else if (f.k === 'tokens') s += 5 + (f.n || 1) * 2;
@@ -3965,6 +3972,8 @@
       const myrkul = p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'));
       for (const x of fodder) s -= x.token ? 1 : Math.max(0, this.creatureValue(x) * 0.6 - (myrkul ? this.myrkulGain(x) : 0));
       s -= (ab.life || 0) * 0.4 + (cost.mv || 0) * 0.5;
+      // sacrificing the card itself costs what it's worth on the battlefield (a mana rock early on is worth a lot)
+      if (ab.sac) s -= Math.max(3, this.permValue(c)) + (c.info.mana ? Math.max(0, 14 - this.round) : 0);
       return s;
     }
     doActivate(p, prep) {
@@ -4294,28 +4303,55 @@
       }
       // Hold back enough blockers to survive the crack-back: estimate what the opponents can swing at us
       // next turn and keep the creatures that would block best (vigilance attackers still block).
-      if (!lethalish && !this._forceAttack) {
+      if (!this._forceAttack) {
         const canBlockAny = (b, a) => { const t = b.tapped; b.tapped = false; const r = this.canBlock(b, a); b.tapped = t; return r; };
+        // When we can kill q, send only what it takes (their blockers stop our biggest attackers they can block)
+        const needed = new Set();
+        if (lethalish) {
+          const qBlockers = q.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b));
+          const lethalWith = (set) => {
+            const used = new Set(); let dmg = 0;
+            for (const a of set.slice().sort((x, y) => this.power(y) - this.power(x))) {
+              const b = qBlockers.find((x) => !used.has(x) && this.canBlock(x, a));
+              if (b) { used.add(b); if (this.hasKw(a, 'trample')) dmg += Math.max(0, this.power(a) - this.toughness(b)); }
+              else dmg += this.scaleDamage(p.seat, q.seat, this.power(a));
+            }
+            return dmg >= q.life;
+          };
+          const pick = [];
+          for (const a of attackers.slice().sort((x, y) => this.power(y) - this.power(x))) { pick.push(a); if (lethalWith(pick)) break; }
+          if (lethalWith(pick)) for (const a of pick) needed.add(a);
+          else for (const a of attackers) needed.add(a); // can't prove it's lethal: keep everything in
+        }
+        // What the other opponents can swing at us before our next turn: each attacks on their own turn, and
+        // the creatures we keep home can block each time (blocking doesn't tap them)
         const incoming = (home) => {
-          let worst = 0;
+          let total = 0;
           for (const o of this.opps(p)) {
+            if (lethalish && o === q) continue; // q is about to die
             const atk = o.bf.filter((c) => c.info.isCreature && !this.pacified(c) && this.power(c) > 0).sort((x, y) => this.power(y) - this.power(x));
             const used = new Set(); let dmg = 0;
             for (const a of atk) {
               const b = home.find((h) => !used.has(h) && canBlockAny(h, a));
-              if (b) used.add(b); else dmg += this.power(a);
+              if (b) used.add(b); else dmg += this.scaleDamage(o.seat, p.seat, this.power(a));
             }
-            worst = Math.max(worst, dmg);
+            total += dmg;
           }
-          return worst;
+          return total;
         };
         const homeOf = () => p.bf.filter((c) => c.info.isCreature && !this.pacified(c) && (!attackers.includes(c) || this.hasKw(c, 'vigilance')));
         // drop the least valuable non-vigilance attacker that would be a useful blocker until we are safe
+        // (never one we need for the kill)
         for (let guard = 0; guard < 10 && attackers.length && incoming(homeOf()) >= p.life; guard++) {
-          const keep = attackers.filter((a) => !this.hasKw(a, 'vigilance') && !a.info.mustAttack && this.toughness(a) >= 2 && !a.info.attack.some((f) => f.k === 'cheatAttack'))
+          const keep = attackers.filter((a) => !needed.has(a) && !this.hasKw(a, 'vigilance') && !a.info.mustAttack && this.toughness(a) >= 2 && !a.info.attack.some((f) => f.k === 'cheatAttack'))
             .sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0];
           if (!keep) break;
           attackers.splice(attackers.indexOf(keep), 1);
+        }
+        // a sure kill: creatures beyond what's needed add nothing (that player is dead anyway), so they stay home
+        // unless attacking costs nothing (vigilance) or they have an attack trigger worth having
+        if (lethalish && needed.size < attackers.length) {
+          for (const a of attackers.slice()) if (!needed.has(a) && !this.hasKw(a, 'vigilance') && !a.info.mustAttack && !a.info.attack.length) attackers.splice(attackers.indexOf(a), 1);
         }
       }
       // Sphere of Safety: pay X per attacker

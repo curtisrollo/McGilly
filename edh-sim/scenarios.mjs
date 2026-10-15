@@ -752,4 +752,27 @@ export default [
       return { ok: me.hand.length === h0 + 1, note: `drew ${me.hand.length - h0}` };
     },
   },
+  {
+    card: 'combat', title: 'going for a kill sends only what it takes and keeps blockers home against the other opponents',
+    wrong: 'everything attacked the player it could kill, leaving no blockers for the next opponent',
+    run({ table, put }) {
+      const g = table(); const [me, a, b, c] = g.players; a.life = 6; me.life = 12;
+      for (let i = 0; i < 4; i++) put(g, me, 'Craterhoof Behemoth');
+      put(g, b, 'Craterhoof Behemoth'); put(g, b, 'Craterhoof Behemoth'); put(g, c, 'Craterhoof Behemoth');
+      g.chooseDefender = () => a; g.combat(me);
+      const home = me.bf.filter((x) => x.name === 'Craterhoof Behemoth' && !x.tapped).length;
+      return { ok: a.lost && home >= 2, note: `killed: ${a.lost}, kept home: ${home}` };
+    },
+  },
+  {
+    card: 'Osgir, the Reconstructor', title: 'copies two Hedron Archives (+4 mana) rather than leaving them in the graveyard',
+    wrong: 'the copies were valued below an ordinary spell, so the ability often went unused',
+    run({ table, put, card }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Osgir, the Reconstructor'); card(g, me, 'Hedron Archive', 'gy'); card(g, me, 'Birds of Paradise', 'hand');
+      for (const c of me.bf.filter((x) => x.info.isLand).slice(5)) g.removeFrom(me.bf, c);
+      g.mainPhase(me);
+      const copies = me.bf.filter((c) => c.token && c.name === 'Hedron Archive').length;
+      return { ok: copies === 2 && me.bf.some((c) => c.name === 'Birds of Paradise'), note: `${copies} copies, Birds cast: ${me.bf.some((c) => c.name === 'Birds of Paradise')}` };
+    },
+  },
 ];
