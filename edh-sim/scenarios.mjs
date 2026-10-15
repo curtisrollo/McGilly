@@ -163,4 +163,102 @@ export default [
       return { ok: ste.zone === 'gy' && l1 < l0, note: `${ste.zone}, drain ${l0 - l1}` };
     },
   },
+  {
+    card: 'Kaalia of the Vast', title: 'a creature she puts in attacking does not get its own attack trigger',
+    wrong: 'a cheated-in Aurelia gave an extra combat (it was never declared as an attacker)',
+    run({ table, put, card }) {
+      const g = table(); const me = g.players[0]; const k = put(g, me, 'Kaalia of the Vast'); k.isCommander = true;
+      card(g, me, 'Aurelia, the Warleader', 'hand');
+      const ev = []; const em = g.emit.bind(g); g.emit = (kind, text, x) => { ev.push(text); return em(kind, text, x); };
+      g.combat(me);
+      const extra = ev.filter((t) => /additional combat/.test(t)).length;
+      return { ok: me.bf.some((c) => c.name === 'Aurelia, the Warleader') && extra === 0, note: `${extra} extra combats` };
+    },
+  },
+  {
+    card: 'Aurelia, the Warleader', title: 'gives exactly one extra combat, untapping everything',
+    wrong: 'extra combats were capped at one per turn across all sources and could be overwritten by another trigger',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Aurelia, the Warleader'); put(g, me, 'Craterhoof Behemoth');
+      const ev = []; const em = g.emit.bind(g); g.emit = (kind, text, x) => { ev.push(text); return em(kind, text, x); };
+      g._forceAttack = true; g.combat(me); g._forceAttack = false;
+      const extra = ev.filter((t) => /additional combat/.test(t)).length, atk = ev.filter((t) => / attacks /.test(t)).length;
+      return { ok: extra === 1 && atk === 2, note: `${extra} extra combats, ${atk} attacks` };
+    },
+  },
+  {
+    card: 'Scourge of the Throne', title: 'the extra combat depends on attacking the player with the most life, checked when it attacks',
+    wrong: 'it was checked after damage, when the player hit usually no longer had the most life',
+    run({ table, put }) {
+      const g = table(); const [me, a, b, c] = g.players; put(g, me, 'Scourge of the Throne');
+      a.life = 50; b.life = 30; c.life = 30; me.life = 30;
+      const ev = []; const em = g.emit.bind(g); g.emit = (kind, text, x) => { ev.push(text); return em(kind, text, x); };
+      g.chooseDefender = () => a; g._forceAttack = true; g.combat(me); g._forceAttack = false;
+      return { ok: ev.some((t) => /additional combat/.test(t)), note: ev.filter((t) => /attacks|combat/.test(t)).slice(0, 3).join(' | ') };
+    },
+  },
+  {
+    card: 'Doubling Season', title: "doesn't double the loyalty a planeswalker's + ability costs, but doubles its starting loyalty",
+    wrong: 'every + ability was doubled (it only applies to counters from effects)',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Doubling Season');
+      return { ok: g.counterAmount(me, 1, 'cost') === 1 && g.counterAmount(me, 4, 'loyalty') === 8, note: `+1 cost -> ${g.counterAmount(me, 1, 'cost')}, enters with 4 -> ${g.counterAmount(me, 4, 'loyalty')}` };
+    },
+  },
+  {
+    card: 'Pir, Imaginative Rascal', title: 'adds one to +1/+1 counters only (not loyalty)',
+    wrong: 'it was read as a counter doubler',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; put(g, me, 'Pir, Imaginative Rascal');
+      return { ok: g.counterAmount(me, 2, 'p1') === 3 && g.counterAmount(me, 2, 'loyalty') === 2, note: `+1/+1: ${g.counterAmount(me, 2, 'p1')}, loyalty: ${g.counterAmount(me, 2, 'loyalty')}` };
+    },
+  },
+  {
+    card: 'Ajani Steadfast', title: '-2 also puts a loyalty counter on each other planeswalker',
+    wrong: 'only the creatures got counters',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const aj = put(g, me, 'Ajani Steadfast'); const jace = put(g, me, 'Jace, the Mind Sculptor'); const l0 = jace.loyalty;
+      g.resolveEffects(me, aj.info.loyaltyAbs[1].fx, aj, null, true);
+      return { ok: jace.loyalty === l0 + 1, note: `Jace ${l0} -> ${jace.loyalty}` };
+    },
+  },
+  {
+    card: 'Teferi, Time Raveler', title: '-3 returns an artifact, creature or enchantment to hand, then draws',
+    wrong: 'it only drew a card',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; const t = put(g, me, 'Teferi, Time Raveler'); const hoof = put(g, opp, 'Craterhoof Behemoth');
+      g.resolveEffects(me, t.info.loyaltyAbs.find((x) => x.delta === -3).fx, t, null, true);
+      return { ok: hoof.zone === 'hand', note: hoof.zone };
+    },
+  },
+  {
+    card: 'Liliana of the Veil', title: '-2 makes one target player sacrifice, not every opponent',
+    wrong: 'every opponent sacrificed a creature',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const l = put(g, me, 'Liliana of the Veil');
+      for (const q of g.players.slice(1)) put(g, q, 'Birds of Paradise');
+      g.resolveEffects(me, l.info.loyaltyAbs.find((x) => x.delta === -2).fx, l, null, true);
+      const left = g.players.slice(1).filter((q) => q.bf.some((c) => c.name === 'Birds of Paradise')).length;
+      return { ok: left === 2, note: `${3 - left} sacrificed` };
+    },
+  },
+  {
+    card: 'Jace, the Mind Sculptor', title: '0 draws three and puts two back (net one card)',
+    wrong: 'it drew three and kept them all',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const j = put(g, me, 'Jace, the Mind Sculptor'); const h0 = me.hand.length;
+      g.resolveEffects(me, j.info.loyaltyAbs.find((x) => x.delta === 0).fx, j, null, true);
+      return { ok: me.hand.length === h0 + 1, note: `hand ${h0} -> ${me.hand.length}` };
+    },
+  },
+  {
+    card: 'Archfiend of Despair', title: "triggers at every player's end step",
+    wrong: "it did nothing on opponents' end steps",
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; put(g, me, 'Archfiend of Despair');
+      g.loseLife(opp, 5); const l0 = opp.life; g._thatPlayer = opp;
+      for (const e of me.bf.find((c) => c.name === 'Archfiend of Despair').info.endstep) g.resolveEffects(me, e.fx, null, null, true);
+      return { ok: opp.life === l0 - 5, note: `${l0} -> ${opp.life}` };
+    },
+  },
 ];

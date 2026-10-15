@@ -423,7 +423,9 @@
       if (/during each of your turns, you may play a land and cast a permanent spell of each permanent type from your graveyard/.test(low)) { a.statics.push({ k: 'muldrotha' }); continue; }
       if (/^if an effect would create one or more tokens under your control, it creates twice that many/.test(low)) { a.statics.push({ k: 'tokenDouble' }); continue; } // its counter sentence is its own line (counterDouble below)
       if (/^if one or more tokens would be created under your control, twice that many/.test(low)) { a.statics.push({ k: 'tokenDouble' }); continue; }
-      if (/^if one or more \+1\/\+1 counters would be put on a creature you control, that many plus one/.test(low) || /^if an effect would put one or more counters on a permanent you control, it puts twice that many/.test(low)) { a.statics.push({ k: 'counterDouble' }); continue; }
+      if (/^if one or more \+1\/\+1 counters would be put on a (?:creature|permanent) you control, that many plus one/.test(low)) { a.statics.push({ k: 'counterPlus' }); continue; }
+      // Doubling Season: only counters put on by effects (a planeswalker's + loyalty cost isn't an effect)
+      if (/^if an effect would put one or more counters on a permanent you control, it puts twice that many/.test(low)) { a.statics.push({ k: 'counterDouble', effectOnly: true }); continue; }
       if (/^other permanents you control have indestructible/.test(low)) { a.statics.push({ k: 'allIndestructible' }); continue; }
       if (/^artifacts you control have indestructible/.test(low)) { a.statics.push({ k: 'artIndestructible' }); continue; }
       if (/^other permanents you control have hexproof/.test(low)) { a.statics.push({ k: 'allHexproof' }); continue; }
@@ -588,10 +590,11 @@
   const SCRIPTS = {
     'Academy Rector': (a, cover) => { a.dies = []; a.dies.push({ k: 'search', n: 1, what: 'enchantment', dest: 'bf' }); cover(/dies/); },
     'Arena Rector': (a, cover) => { a.dies = []; a.dies.push({ k: 'search', n: 1, what: 'planeswalker', dest: 'bf' }); cover(/dies/); },
-    'Ajani Steadfast': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'pump', p: 1, t: 1, kw: ['first strike', 'vigilance', 'lifelink'] }]; a.loyaltyAbs[2].fx = [{ k: 'emblem', e: 'damageCap1' }]; cover(ALL); },
+    'Ajani Steadfast': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'pump', p: 1, t: 1, kw: ['first strike', 'vigilance', 'lifelink'] }]; a.loyaltyAbs[1].fx = [{ k: 'counters', n: 1, on: 'each' }, { k: 'loyaltyEach', other: true }]; a.loyaltyAbs[2].fx = [{ k: 'emblem', e: 'damageCap1' }]; cover(ALL); },
+    'Brokers Ascendancy': (a, cover) => { a.endstep = [{ each: false, fx: [{ k: 'counters', n: 1, on: 'each' }, { k: 'loyaltyEach' }] }]; cover(ALL); },
     'Alibou, Ancient Witness': (a, cover) => { a.statics.push({ k: 'artifactHaste' }); cover(/haste/); },
     "Archaeomancer's Map": (a, cover) => { a.etb = [{ k: 'ramp', bf: 0, hand: 2, landTypes: ['Plains'], basicOnly: true }]; a.triggers.push({ k: 'mapCatchUp' }); cover(ALL); },
-    'Archfiend of Despair': (a, cover) => { a.statics.push({ k: 'noOppGain' }); a.endstep.push({ each: true, fx: [{ k: 'archfiend' }] }); cover(ALL); },
+    'Archfiend of Despair': (a, cover) => { a.statics.push({ k: 'noOppGain' }); a.endstep = [{ each: true, fx: [{ k: 'archfiend' }] }]; cover(ALL); },
     "Archon of Sun's Grace": (a, cover) => { a.statics.push({ k: 'anthem', sub: 'Pegasus', p: 0, t: 0, kw: ['lifelink'] }); a.constellation = [[{ k: 'tokens', n: 1, p: 2, t: 2, sub: 'Pegasus', colors: 'white', kw: ['flying'] }]]; a.statics = a.statics.filter((x) => x.k !== 'misc'); cover(ALL); },
     'Astral Cornucopia': (a, cover) => { a.chargeX = true; a.mana = { opts: [{ colors: COLORS.slice(), amount: 0, dmg: 0 }], oneShot: false, charge: true }; cover(ALL); },
     'Audacious Reshapers': (a, cover) => { a.activated.push({ tap: true, sacArtifact: 1, cost: parseCost(''), fx: [{ k: 'revealUntil', what: 'artifact', dest: 'bf', selfDamage: true }], text: 'Reveal until an artifact and put it onto the battlefield' }); cover(ALL); },
@@ -690,7 +693,7 @@
     'Homeward Path': (a, cover) => { cover(ALL); },
     'Jace, Unraveler of Secrets': (a, cover) => { const ult = a.loyaltyAbs.find((x) => x.delta <= -8); if (ult) ult.fx = [{ k: 'emblem', e: 'jaceCounter' }]; cover(ALL); },
     'Jace, Wielder of Mysteries': (a, cover) => { a.statics = a.statics.filter((x) => x.k !== 'misc'); a.statics.push({ k: 'labman' }); cover(ALL); },
-    'Jace, the Mind Sculptor': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'fateseal' }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -12); if (ult) ult.fx = [{ k: 'exileLibrary' }]; cover(ALL); },
+    'Jace, the Mind Sculptor': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'fateseal' }]; const z = a.loyaltyAbs.find((x) => x.delta === 0); if (z) z.fx = [{ k: 'brainstorm' }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -12); if (ult) ult.fx = [{ k: 'exileLibrary' }]; cover(ALL); },
     "Jeska's Will": (a, cover) => { a.spell = [{ k: 'jeska' }, { k: 'impulse', n: 3 }]; cover(ALL); },
     'Junji, the Midnight Sky': (a, cover) => { a.dies = [{ k: 'junji' }]; a.statics = a.statics.filter((x) => x.k !== 'misc'); cover(ALL); },
     'Kaalia, Zenith Seeker': (a, cover) => { a.etb = [{ k: 'dig', n: 6, types: ['angel', 'demon', 'dragon'], all: true }]; cover(ALL); },
@@ -704,7 +707,7 @@
     'Ledger Shredder': (a, cover) => { cover(ALL); },
     'Life from the Loam': (a, cover) => { a.spell = [{ k: 'regrowLands', n: 3 }]; a.dredge = 3; cover(ALL); },
     'Liliana Vess': (a, cover) => { const ult = a.loyaltyAbs.find((x) => x.delta <= -8); if (ult) ult.fx = [{ k: 'massReanimate' }]; cover(ALL); },
-    'Liliana of the Veil': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'discardAll' }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -6); if (ult) ult.fx = [{ k: 'piles' }]; cover(ALL); },
+    'Liliana of the Veil': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'discardAll' }]; const m2 = a.loyaltyAbs.find((x) => x.delta === -2); if (m2) m2.fx = [{ k: 'edict', one: true }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -6); if (ult) ult.fx = [{ k: 'piles' }]; cover(ALL); },
     "Liliana, Death's Majesty": (a, cover) => { const ult = a.loyaltyAbs.find((x) => x.delta <= -7); if (ult) ult.fx = [{ k: 'wipe', what: 'creatures', spare: 'Zombie' }]; cover(ALL); },
     'Liliana, Dreadhorde General': (a, cover) => { const four = a.loyaltyAbs.find((x) => x.delta === -4); if (four) four.fx = [{ k: 'edictAll', n: 2 }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -9); if (ult) ult.fx = [{ k: 'liliana9' }]; cover(ALL); },
     'Lord of the Void': (a, cover) => { a.combatDmg = [{ k: 'lordOfVoid' }]; cover(ALL); },
@@ -777,7 +780,7 @@
     "Teferi's Protection": (a, cover) => { cover(ALL); },
     'Teferi, Hero of Dominaria': (a, cover) => { const t8 = a.loyaltyAbs.find((x) => x.delta === -8); if (t8) t8.fx = [{ k: 'emblem', e: 'teferi' }]; const m3 = a.loyaltyAbs.find((x) => x.delta === -3); if (m3) m3.fx = [{ k: 'removal', what: 'nonland', tuck: true }]; a.loyaltyAbs[0].fx = [{ k: 'draw', n: 1 }, { k: 'untapLandsN', n: 2 }]; cover(ALL); },
     'Teferi, Master of Time': (a, cover) => { const m3 = a.loyaltyAbs.find((x) => x.delta === -3); if (m3) m3.fx = [{ k: 'phaseOut' }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -10); if (ult) ult.fx = [{ k: 'extraTurn' }, { k: 'extraTurn' }]; cover(ALL); },
-    'Teferi, Time Raveler': (a, cover) => { a.statics.push({ k: 'raveler' }); a.loyaltyAbs[0].fx = [{ k: 'noop' }]; cover(ALL); },
+    'Teferi, Time Raveler': (a, cover) => { a.statics.push({ k: 'raveler' }); a.loyaltyAbs[0].fx = [{ k: 'noop' }]; const m3 = a.loyaltyAbs.find((x) => x.delta === -3); if (m3) m3.fx = [{ k: 'removal', what: 'nonlandNonPW', bounce: true }, { k: 'draw', n: 1 }]; cover(ALL); },
     'Temple of Triumph': (a, cover) => { a.etb = [{ k: 'scry', n: 1 }]; cover(ALL); },
     'Terror of the Peaks': (a, cover) => { a.wardLife = 3; cover(ALL); },
     'The Chain Veil': (a, cover) => { a.chainVeil = true; cover(ALL); },
@@ -796,7 +799,7 @@
     'Voldaren Estate': (a, cover) => { a.activated = [{ tap: true, cost: parseCost('5'), tribeDiscount: 'Vampire', fx: [{ k: 'blood' }], text: 'Create a Blood token.', lowPriority: true }]; cover(ALL); },
     'Vorinclex, Monstrous Raider': (a, cover) => { a.statics.push({ k: 'vorinclexHalf' }); cover(ALL); },
     'Vraska the Unseen': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'vraskaShield' }]; cover(ALL); },
-    'Walking Ballista': (a, cover) => { cover(ALL); },
+    'Walking Ballista': (a, cover) => { a.activated = a.activated.filter((x) => !x.fx.some((f) => f.k === 'damage')); cover(ALL); }, // pinging (remove a counter) is handled by pingers()
     'Yawgmoth, Thran Physician': (a, cover) => { a.protectionFrom = 'Human'; cover(ALL); },
     'Zur the Enchanter': (a, cover) => { a.attack = [{ k: 'search', n: 1, what: 'enchantment', mvMax: 3, dest: 'bf' }]; cover(ALL); },
     'Glen Elendra Archmage': (a, cover) => { cover(ALL); },
@@ -1455,10 +1458,11 @@
       return t;
     }
     // How many counters actually land: doublers, Hardened-Scales style +1, Vorinclex halving for its opponents
-    counterAmount(p, n) {
+    // kind: 'p1' (+1/+1 counters), 'loyalty', 'charge', or 'cost' (loyalty put on to activate a + ability)
+    counterAmount(p, n, kind = 'p1') {
       if (!n) return 0;
-      n *= this.counterMult(p);
-      n += this.statics(p, 'counterPlus').length;
+      n *= this.counterMult(p, kind);
+      if (kind === 'p1') n += this.statics(p, 'counterPlus').length;
       if (this.opps(p).some((q) => this.has(q, 'vorinclexHalf'))) n = Math.floor(n / 2);
       return n;
     }
@@ -1490,7 +1494,11 @@
       if (cp.eot) c.animatedEOT = true;
       this.emit('effect', `${c.name} enters as a copy of ${best.info.name}.`, { seat: p.seat, cards: [c.id, best.id] });
     }
-    counterMult(p) { return 2 ** (this.statics(p, 'counterDouble').length + this.alive().reduce((s2, q) => s2 + this.statics(q, 'globalDouble').length, 0)); }
+    counterMult(p, kind = 'p1') {
+      const own = this.statics(p, 'counterDouble').filter(({ s: st }) => !(kind === 'cost' && st.effectOnly)).length;
+      const vigor = kind === 'p1' ? this.alive().reduce((s2, q) => s2 + this.statics(q, 'globalDouble').length, 0) : 0; // Primal Vigor: +1/+1 counters only
+      return 2 ** (own + vigor);
+    }
 
     // Life-loss loops: a "whenever you gain life, opponents lose life" effect plus a "whenever an opponent loses life, you gain that much" effect
     bondTriggers(p) { return p.bf.flatMap((c) => c.info.triggers.filter((t) => t.k === 'bond' || (t.k === 'onGain' && t.fx.some((f) => f.k === 'drain' || f.k === 'drainOne'))).map((t) => ({ t, c }))); }
@@ -1826,13 +1834,13 @@
       c.zone = 'bf'; c.ctrl = p.seat; c.sick = true; c.tapped = !!o.tapped; c.dmg = 0;
       // copy effects choose what to copy as they enter
       if (c.info.copy && !c.copiedFrom) this.copyOnEnter(c, p);
-      if (c.info.isPW) c.loyalty = this.counterAmount(p, c.info.loyalty || 3) + (c.copyPlusOne ? 1 : 0);
+      if (c.info.isPW) c.loyalty = this.counterAmount(p, (c.info.loyalty || 3) + (c.copyPlusOne ? 1 : 0), 'loyalty');
       if (c.info.etbCounters) c.p1 = this.counterAmount(p, c.info.etbCounters === 'X' ? (o.xVal || 0) : c.info.etbCounters);
       if (c.copyPlusOne && c.info.isCreature) c.p1 += this.counterAmount(p, 1);
       if (o.p1) c.p1 = (c.p1 || 0) + o.p1;
       // charge counters it enters with count as counters being put on it (Doubling Season doubles them)
-      if (c.info.chargeX) c.charge = o.xVal ? this.counterAmount(p, o.xVal) : 0;
-      if (c.info.multikicker) c.charge = o.kicks ? this.counterAmount(p, o.kicks) : 0;
+      if (c.info.chargeX) c.charge = o.xVal ? this.counterAmount(p, o.xVal, 'charge') : 0;
+      if (c.info.multikicker) c.charge = o.kicks ? this.counterAmount(p, o.kicks, 'charge') : 0;
       if (c.info.converge) c.p1 = this.counterAmount(p, Math.min(o.colorsSpent || p.colors.length, 5));
       if (c.info.prepared) c.prepared = true;
       if (c.info.banner || c.info.cavern) c.chosenType = this.favouriteType(p);
@@ -2103,6 +2111,7 @@
             creature: (c) => c.info.isCreature, creaturepw: (c) => c.info.isCreature || c.info.isPW, nonland: (c) => !c.info.isLand,
             artifact: (c) => c.info.types.has('Artifact'), enchantment: (c) => c.info.types.has('Enchantment'),
             artench: (c) => c.info.types.has('Artifact') || c.info.types.has('Enchantment'), planeswalker: (c) => c.info.isPW,
+            nonlandNonPW: (c) => !c.info.isLand && !c.info.isPW, permanent: () => true,
           }[fx.what] || ((c) => !c.info.isLand);
           const tgt = src && src._target ? src._target : this.bestOppTarget(p, (c) => pred(c) && this.targetable(c, p));
           if (!tgt || tgt.zone !== 'bf') break;
@@ -2133,7 +2142,9 @@
           break;
         }
         case 'edict': {
-          for (const q of this.opps(p)) {
+          // "target player sacrifices": the opponent whose cheapest creature is still the most valuable
+          const edictTargets = fx.one ? [this.opps(p).filter((q) => q.bf.some((x) => x.info.isCreature) && !this.has(q, 'sigarda')).sort((a, b) => Math.min(...b.bf.filter((x) => x.info.isCreature).map((x) => this.creatureValue(x))) - Math.min(...a.bf.filter((x) => x.info.isCreature).map((x) => this.creatureValue(x))))[0]].filter(Boolean) : this.opps(p);
+          for (const q of edictTargets) {
             if (this.has(q, 'sigarda')) continue;
             const cs = q.bf.filter((x) => x.info.isCreature).sort((a, b) => this.creatureValue(a) - this.creatureValue(b)).slice(0, fx.n || 1);
             if (cs.length) this.emit('removal', `${name ? name + ': ' : ''}${q.name} sacrifices ${cs.map((c) => this.cname(c)).join(', ')}.`, { seat: p.seat, cards: cs.map((c) => c.id), target: q.seat });
@@ -2235,13 +2246,12 @@
         case 'proliferate': {
           // proliferate: choose any permanents and players that have counters and give each one more of a kind it has.
           // Ours: +1/+1, loyalty, charge. Theirs: -1/-1 counters on their creatures, poison on them.
-          const pm = this.counterMult(p);
           const hit = [];
           for (const c of p.bf) {
             let any = false;
-            if (c.p1 > 0) { c.p1 += pm; any = true; }
-            if (c.info.isPW && c.loyalty > 0) { c.loyalty += pm; any = true; }
-            if (c.charge > 0 && !c.info.saga) { c.charge += pm; any = true; }
+            if (c.p1 > 0) { c.p1 += this.counterAmount(p, 1, 'p1'); any = true; }
+            if (c.info.isPW && c.loyalty > 0) { c.loyalty += this.counterAmount(p, 1, 'loyalty'); any = true; }
+            if (c.charge > 0 && !c.info.saga) { c.charge += this.counterAmount(p, 1, 'charge'); any = true; }
             if (any) hit.push(c);
           }
           for (const q of this.opps(p)) {
@@ -2391,6 +2401,21 @@
           break;
         }
         case 'loseSelf': this.loseLife(p, X(fx.n)); break;
+        case 'loyaltyEach': {
+          const ws = p.bf.filter((c) => c.info.isPW && (!fx.other || c !== src));
+          for (const c of ws) c.loyalty += this.counterAmount(p, 1, 'loyalty');
+          if (ws.length && !quiet) this.emit('effect', `${name}: a loyalty counter on ${this.listNames(ws.map((c) => c.info.name))}.`, { seat: p.seat, cards: ws.map((c) => c.id) });
+          break;
+        }
+        case 'brainstorm': {
+          // Jace's 0: draw three, then put back the two cards we want least (extra lands first when we have plenty)
+          this.draw(p, 3);
+          const lands = p.bf.filter((c) => c.info.isLand).length;
+          const back = p.hand.slice().sort((a, b) => (a.info.isLand ? (lands >= 6 ? -5 : 5) : this.cardValue(p, a)) - (b.info.isLand ? (lands >= 6 ? -5 : 5) : this.cardValue(p, b))).slice(0, 2);
+          for (const c of back.reverse()) { this.removeFrom(p.hand, c); c.zone = 'library'; p.library.unshift(c); }
+          this.emit('draw', `${name}: ${p.name} draws three and puts two back on top.`, { seat: p.seat, cards: src ? [src.id] : [] });
+          break;
+        }
         case 'bloodgift': {
           // "target player draws a card and loses 1 life": us when we can afford it, else the opponent closest to dying
           const q = this.canPayLife(p, 1) ? p : this.opps(p).sort((a, b) => a.life - b.life)[0];
@@ -2486,7 +2511,7 @@
           this.emit('effect', `${p.name} gets an emblem from ${name}.`, { seat: p.seat, cards: src ? [src.id] : [] });
           break;
         }
-        case 'archfiend': { const q = this._thatPlayer; if (!q || q === p) { for (const o of this.opps(p)) if (o.lostTurn === this.turn && o.lostThis > 0) { const n = o.lostThis; this.loseLife(o, n, src); this.emit('drain', `Archfiend of Despair: ${o.name} loses another ${n}.`, { seat: p.seat, target: o.seat }); } } this.checkState(); break; }
+        case 'archfiend': { for (const o of this.opps(p)) if (o.lostTurn === this.turn && o.lostThis > 0) { const n = o.lostThis; this.loseLife(o, n, src); this.emit('drain', `Archfiend of Despair: ${o.name} loses another ${n}.`, { seat: p.seat, target: o.seat }); } this.checkState(); break; }
         case 'revealUntil': {
           let n = 0, hit = null;
           while (p.library.length) { const c = p.library.shift(); n++; if (c.info.types.has('Artifact') && !c.info.isLand) { hit = c; break; } c.zone = 'library'; p.library.push(c); }
@@ -2537,7 +2562,7 @@
           this.removeFrom(p.gy, c); c.zone = 'exile'; p.exile.push(c);
           for (let i = 0; i < 2 * this.tokenMult(p); i++) {
             const t = this.makeToken(p, { sub: 'copy' }); t.info = c.info; t.name = c.info.name; t.ctrl = p.seat; p.bf.push(t);
-            if (t.info.isPW) t.loyalty = this.counterAmount(p, t.info.loyalty || 3);
+            if (t.info.isPW) t.loyalty = this.counterAmount(p, t.info.loyalty || 3, 'loyalty');
             if (t.info.isCreature) this.creatureEntered(p, t);
             if (t.info.etb.length) this.resolveEffects(p, t.info.etb, t, null, true);
           }
@@ -2682,7 +2707,13 @@
           if (arts.length) this.emit('removal', `${name} steals ${arts.length} artifacts from ${q.name}.`, { seat: p.seat, cards: arts.map((c) => c.id), target: q.seat });
           break;
         }
-        case 'extraCombat': if (p.extraCombatTurn !== this.turn) this._extraCombat = fx; break;
+        case 'extraCombat': {
+          // Aurelia / Scourge: the first time it attacks each turn. Bloodthirster: each time it deals combat damage to a player.
+          if (fx.dethrone) { const q = this._attackTarget; if (!q || q.life < Math.max(...this.alive().map((x) => x.life))) break; }
+          if (src && !fx.newTarget) { if (src.extraCombatTurn === this.turn) break; src.extraCombatTurn = this.turn; }
+          (this._extraCombats = this._extraCombats || []).push({ fx, src });
+          break;
+        }
         case 'hermit': {
           const milled = [];
           while (p.library.length) { const c = p.library.shift(); if (c.info.isLand && c.info.types.has('Basic')) { c.zone = 'hand'; p.hand.push(c); break; } this.toGraveyard(c); milled.push(c); }
@@ -3942,10 +3973,11 @@
     }
 
     useWalkers(p, postCombat, again = false) {
-      if (postCombat) return;
-      const uses = this.has(p, 'oathTeferi') ? 2 : 1;
+      // The Chain Veil (again): exactly one more activation per planeswalker; Oath of Teferi: two a turn
+      const uses = again ? 1 : this.has(p, 'oathTeferi') ? 2 : 1;
       for (const c of [...p.bf]) {
         if (!c.info.isPW || c.zone !== 'bf') continue;
+        if (postCombat && c.usedTurn === this.turn) continue; // after combat: only walkers that haven't acted yet (cast in main 2)
         for (let u = 0; u < uses; u++) {
           if (c.zone !== 'bf') break;
           if (c.usedTurn === this.turn && (c.usedCount || 0) >= uses) break;
@@ -3974,7 +4006,7 @@
           if (best < 12) return { a, s: -99 };
           c.uginX = bestX; return { a, s: 20 + best / 2, delta: -bestX };
         }
-        if (delta < 0 && c.loyalty + delta < 0) return { a, s: -99 };
+        if (delta < 0 && c.loyalty + delta + carth < 0) return { a, s: -99 };
         if (delta === -99) return { a, s: -99 };
         let s = 0;
         for (const f of a.fx) {
@@ -3997,7 +4029,7 @@
       const choice = scored[0];
       if (!choice || choice.s < -50) return false;
       const d = choice.delta ?? choice.a.delta;
-      c.loyalty += d > 0 ? this.counterAmount(p, d + carth) : d + carth;
+      c.loyalty += d + carth > 0 ? this.counterAmount(p, d + carth, 'cost') : d + carth;
       this.emit('ability', `${c.info.name} [${d > 0 ? '+' : ''}${d}]: ${choice.a.text.slice(0, 90)}`, { seat: p.seat, cards: [c.id] });
       this.resolveEffects(p, choice.a.fx, c, null, false);
       this.checkState();
@@ -4156,7 +4188,7 @@
       // assign some attackers to opposing planeswalkers
       const assign = new Map();
       const walkers = q.bf.filter((c) => c.info.isPW).sort((a, b) => b.loyalty - a.loyalty);
-      const pool = attackers.slice();
+      const pool = attackers.filter((a) => !a.info.attack.some((f) => f.k === 'cheatAttack'));
       for (const w of walkers) {
         if (w.loyalty < 3 && pool.length < 3) continue;
         let need = w.loyalty;
@@ -4175,15 +4207,16 @@
         const x = p.bf.filter((c) => c.info.types.has('Artifact') && c.tapped).length;
         if (x) { this.dealDamageAny(p, x, src, 'Alibou'); this.resolveEffect(p, { k: 'scry', n: x }, src, 0, true); }
       }
-      // attack triggers
-      for (const a of attackers) {
+      // attack triggers: only the declared attackers (a creature put onto the battlefield attacking never "attacked")
+      this._attackTarget = q;
+      for (const a of attackers.slice()) {
         for (const f of a.info.attack) {
           if (f.k === 'cheatAttack') {
             const cheat = p.hand.filter((c) => c.info.isCreature && f.subs.some((s) => (c.info.subtypes || []).includes(s))).sort((x, y) => this.creatureValue(y) - this.creatureValue(x))[0];
             if (cheat) {
               this.removeFrom(p.hand, cheat);
               this.enterBattlefield(cheat, p, { tapped: true });
-              cheat.attacking = true; attackers.push(cheat); atkInfo.push({ id: cheat.id, to: null });
+              cheat.attacking = true; cheat.enteredAttacking = this.turn; attackers.push(cheat); atkInfo.push({ id: cheat.id, to: null });
               this.emit('trigger', `${a.info.name} puts ${cheat.info.name} onto the battlefield attacking!`, { seat: p.seat, cards: [cheat.id, a.id], attackers: atkInfo, target: q.seat });
             }
           } else this.resolveEffects(p, [f], a, null, true);
@@ -4238,7 +4271,7 @@
             if (dmg > 0 && ak.has('trample')) this.hitPlayer(p, q, a, dmg, lifelinkGain, (n) => (dealtToPlayer += n));
             else if (dmg > 0 && bs.length) bs[0].dmg += dmg;
           } else {
-            if (a.info.masterOfCruelties) { if (q.life > 1 && q.protectedUntil < this.turn) { this.loseLife(q, q.life - 1, a); this.emit('combo', `Master of Cruelties goes unblocked: ${q.name}'s life total becomes 1!`, { seat: p.seat, cards: [a.id], target: q.seat }); } continue; }
+            if (a.info.masterOfCruelties && a.enteredAttacking !== this.turn) { if (q.life > 1 && q.protectedUntil < this.turn) { this.loseLife(q, q.life - 1, a); this.emit('combo', `Master of Cruelties goes unblocked: ${q.name}'s life total becomes 1!`, { seat: p.seat, cards: [a.id], target: q.seat }); } continue; }
             const wid = assign.get(a.id);
             const w = wid && this.cards[wid];
             if (w && w.zone === 'bf') { w.loyalty -= this.scaleDamage(p.seat, q.seat, dmg); if (ak.has('lifelink')) lifelinkGain.push(dmg); if (w.vraskaShield != null) { this.destroy(a); this.emit('removal', `Vraska destroys ${a.info.name}.`, { seat: q.seat, cards: [a.id] }); } }
@@ -4268,12 +4301,15 @@
       const lostTxt = q.lost ? '' : ` ${q.name} is at ${q.life}.`;
       this.emit('damage', `Combat damage: ${dealtToPlayer} to ${q.name}.${lostTxt}`, { seat: p.seat, attackers: atkInfo.filter((x) => this.cards[x.id].zone === 'bf'), blockers: blkInfo.filter((x) => this.cards[x.id].zone === 'bf'), target: q.seat });
       for (const a of attackers) a.attacking = false;
-      const extra = this._extraCombat; this._extraCombat = null;
-      if (extra && p.extraCombatTurn !== this.turn && !this.over && !p.lost) {
-        if (extra.dethrone && !(q.life >= Math.max(...this.opps(p).map((o) => o.life)))) return;
-        p.extraCombatTurn = this.turn;
-        for (const c of p.bf) if (c.info.isCreature && (extra.untapAll || attackers.includes(c))) c.tapped = false;
-        this.emit('combo', `${p.name} untaps and takes an additional combat phase!`, { seat: p.seat });
+      // additional combat phases, one per trigger that granted one (capped so a loop can't run forever)
+      const queued = this._extraCombats || []; this._extraCombats = [];
+      if (p.extraCombatsTurn !== this.turn) { p.extraCombatsTurn = this.turn; p.extraCombats = 0; }
+      for (const { fx: extra, src } of queued) {
+        if (this.over || p.lost || p.extraCombats >= 4) break;
+        p.extraCombats++;
+        // Aurelia untaps all your creatures; Bloodthirster untaps only itself; others untap the attackers
+        for (const c of p.bf) if (c.info.isCreature && (extra.untapAll || (extra.untapSelf ? c === src : attackers.includes(c)))) c.tapped = false;
+        this.emit('combo', `${src ? src.info.name + ': ' : ''}${p.name} ${extra.untapAll ? 'untaps all creatures and ' : extra.untapSelf ? `untaps ${src ? src.info.name : 'it'} and ` : ''}gets an additional combat phase!`, { seat: p.seat, cards: src ? [src.id] : [] });
         this._newTargetOnly = !!extra.newTarget;
         this.combat(p);
         this._newTargetOnly = false;

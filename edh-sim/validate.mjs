@@ -110,6 +110,8 @@ const EXPECT = {
   damage: (a, b) => sum(b.opp, 'life') < sum(a.opp, 'life') || b.any !== a.any || sum(b.opp, 'counters') < sum(a.opp, 'counters'),
   loseSelf: (a, b) => b.me.life < a.me.life,
   counters: (a, b) => b.me.counters > a.me.counters,
+  loyaltyEach: (a, b) => b.me.counters > a.me.counters,
+  brainstorm: (a, b) => b.me.hand === a.me.hand + 1 && b.me.lib === a.me.lib - 1,
   proliferate: (a, b) => b.me.counters > a.me.counters || sum(b.opp, 'poison') > sum(a.opp, 'poison'),
   doubleCounters: (a, b) => b.me.counters > a.me.counters,
   ramp: (a, b) => b.me.lands > a.me.lands || b.me.hand > a.me.hand,
