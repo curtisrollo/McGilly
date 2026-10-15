@@ -406,6 +406,19 @@ scen('Platinum Angel', 'as a Myrkul enchantment copy it still keeps its controll
   me.life = -5; g.checkState();
   return { ok: !me.lost && me.bf.some((c) => c.ench && c.name === 'Platinum Angel'), note: me.lost ? 'lost the game' : '' };
 });
+scen('Devoted Druid', 'with Myrkul it dies into an enchantment copy for unlimited green mana, then Finale of Devastation goes huge', () => {
+  const g = new Game([decks.find((d) => d.id === 'myrkul'), decks[0], decks[1], decks[2]], db, 3, { record: true });
+  g.started = true; g.round = 6; g.turn = 20; g.active = 0; g.phase = 'main';
+  for (const p of g.players) { p.hand = []; p.bf = []; p.gy = []; p.life = 40; }
+  const me = g.players[0];
+  for (let i = 0; i < 2; i++) addLand(g, me);
+  put(g, me, 'Myrkul, Lord of Bones'); put(g, me, 'Devoted Druid'); card(g, me, 'Finale of Devastation', 'hand');
+  g.mainPhase(me);
+  const copy = me.bf.some((c) => c.ench && c.name === 'Devoted Druid');
+  const fin = g.events.find((e) => /Finale of Devastation \(X=(\d+)\)/.test(e.text));
+  const x = fin ? +fin.text.match(/X=(\d+)/)[1] : 0;
+  return { ok: copy && me.infMana === g.turn && x >= 10, note: `copy ${copy}, unlimited mana ${me.infMana === g.turn}, Finale X=${x}` };
+});
 scen('combat', 'a big creature does not attack into an untapped deathtouch blocker', () => {
   const g = table(); const [me, opp] = g.players; const big = put(g, me, 'Craterhoof Behemoth');
   for (const q of g.players.slice(1)) put(g, q, 'Vampire Nighthawk');

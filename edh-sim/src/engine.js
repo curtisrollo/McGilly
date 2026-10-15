@@ -19,6 +19,8 @@
     { name: 'Sanguine Bond loop', pieces: [['Sanguine Bond', 'Vito, Thorn of the Dusk Rose', 'Dina, Soul Steeper'], ['Exquisite Blood', 'Bloodthirsty Conqueror']] },
     { name: 'Karn lock', pieces: [['Karn, the Great Creator'], ['Mycosynth Lattice']] },
     { name: 'Infinite mana', pieces: [['Basalt Monolith'], ['Rings of Brighthearth']] },
+    { name: 'Myrkul + Devoted Druid', pieces: [['Myrkul, Lord of Bones'], ['Devoted Druid']] },
+    { name: 'Myrkul + Cinderhaze Wretch', pieces: [['Myrkul, Lord of Bones'], ['Cinderhaze Wretch']] },
     { name: 'Aetherflux kill', pieces: [['Basalt Monolith'], ['Rings of Brighthearth'], ['Staff of Domination'], ['Aetherflux Reservoir']] },
     { name: 'Ballista', pieces: [['Basalt Monolith'], ['Rings of Brighthearth'], ['Walking Ballista']] },
     { name: 'Dragon fire', pieces: [['Terror of the Peaks', 'Dragon Tempest'], ['Fiery Emancipation', 'Gisela, Blade of Goldnight']] },
@@ -1509,6 +1511,28 @@
     locked(p) { return this.opps(p).some((q) => this.has(q, 'karn')) && this.alive().some((q) => this.has(q, 'lattice')); }
 
     // Check for infinite combos on p's board and cash them in
+    // Myrkul + Devoted Druid: let the Druid die to its own -1/-1 counters; Myrkul brings it back as an
+    // enchantment, which isn't a creature, so the counters do nothing and it untaps forever: unlimited green mana.
+    myrkulDruid(p) {
+      if (p.lost || this.over) return false;
+      const noAnimate = () => !this.alive().some((q) => this.has(q, 'opalescence'));
+      let copy = p.bf.find((x) => x.ench && x.info.druid && !x.info.isCreature);
+      if (!copy) {
+        const myrkul = p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'));
+        const druid = p.bf.find((x) => x.info.druid && x.info.isCreature && !x.token && !x.isCommander);
+        if (!myrkul || !druid || !noAnimate() || this.locked(p)) return false;
+        this.emit('combo', `${p.name} puts -1/-1 counters on Devoted Druid until it dies, so Myrkul brings it back as an enchantment.`, { seat: p.seat, cards: [druid.id] });
+        for (let i = 0; i < 6 && druid.zone === 'bf'; i++) { druid.p1 -= 1; this.addFloating(p, 'G', 1); this.checkState(); }
+        this.refreshAnimations();
+        copy = p.bf.find((x) => x.ench && x.info.druid && !x.info.isCreature);
+        if (!copy) return false;
+      }
+      if (p.infMana === this.turn && (p.infColors || []).includes('G')) return false;
+      p.infMana = this.turn; p.infColors = [...new Set([...(p.infColors || []), 'G'])];
+      if (!p.druidLoopShown) { p.druidLoopShown = true; this.emit('combo', `The enchantment Devoted Druid taps for G, takes a -1/-1 counter that does nothing to a non-creature, untaps, and does it again: ${p.name} has unlimited green mana.`, { seat: p.seat, cards: [copy.id] }); }
+      else this.emit('combo', `${p.name} loops the enchantment Devoted Druid for unlimited green mana again.`, { seat: p.seat, cards: [copy.id] });
+      return true;
+    }
     checkCombos(p) {
       if (p.lost || this.over) return;
       if (this.has(p, 'karn') && this.alive().some((q) => this.has(q, 'lattice')) && !p.lockAnnounced) {
@@ -1705,10 +1729,13 @@
       const dmgSoFar = (u) => u.reduce((a, x) => a + (x.o.dmg || 0), 0);
       const anyColor = this.alive().some((q) => this.has(q, 'anyColorMana'));
       const pips = cost.pips.slice().sort((a, b) => a.opts.length - b.opts.length).map((pp) => (anyColor && pp.opts.length && pp.opts[0] !== 'C' ? { ...pp, opts: COLORS.slice() } : pp));
+      const infCols = p.infMana === this.turn ? (p.infColors || []) : [];
       for (const pip of pips) {
         let ok = false;
         for (const col of pip.opts) if (take(col)) { ok = true; break; }
         if (ok) continue;
+        const free = pip.opts.find((col) => infCols.includes(col));
+        if (free) { spent.push(free); continue; }
         // find source
         let best = null, bestScore = 1e9, bestOpt = null, bestCol = null;
         for (const s of srcs) {
@@ -3016,6 +3043,7 @@
           s += lifeLoss * 0.35 + kills * 35;
           if (!kills && X < 8 && turnN < 14) return -1;
         }
+        if (f.k === 'finale') { const x = this.maxX(p, this.costFor(p, c, from)); if (x < 3) return -1; s += x >= 10 ? 60 + Math.min(40, p.bf.filter((y) => this.canAttack(y) || y.info.isCreature).length * 4) : x * 3; }
         if (f.k === 'genesis') { const x = f.majestic ? Math.max(0, ...p.bf.concat(p.command).filter((y) => y.isCommander).map((y) => y.info.mv)) : this.maxX(p, this.costFor(p, c, from)); s += x * 3; if (!f.majestic && x < 4) return -1; }
         if (f.k === 'reanimate') { const pools = f.any ? opp.concat([p]).flatMap((q) => q.gy) : p.gy; const best = pools.filter((x) => x.info.isCreature && !x.isCommander).sort((a, b) => this.creatureValue(b) - this.creatureValue(a))[0]; if (!best) { if (!i.isPermanent || i.reanimAura) return -1; } else s += this.creatureValue(best); }
         if (f.k === 'regrow') { if (!p.gy.some((x) => !x.info.isLand)) s -= 3; else s += 6; }
@@ -3522,8 +3550,11 @@
     mainPhase(p, second = false) {
       if (!second && p.drainMana) { this.addFloating(p, 'C', p.drainMana); this.emit('effect', `Mana Drain gives ${p.name} ${p.drainMana} extra mana.`, { seat: p.seat }); p.drainMana = 0; }
       this.playLand(p);
+      this.myrkulDruid(p);
       let guard = 0;
       while (guard++ < 40 && !p.lost && !this.over) {
+        // a combo that just came together (Druid cast with Myrkul out) makes the mana before the next spell
+        if (this.myrkulDruid(p)) continue;
         const options = this.castOptions(p);
         // a strong activated ability (Osgir copying Wurmcoil, Razaketh tutoring) can beat casting a spell
         const used = this._usedAbilities && this._usedAbilities.turn === this.turn ? this._usedAbilities.set : new Set();
