@@ -22,6 +22,17 @@ export default [
     },
   },
   {
+    card: 'Walking Ballista', title: 'with unlimited mana, pumps until it can kill the table, then pings everyone out',
+    wrong: 'it kept paying {4} as long as mana was left, so Myrkul + Devoted Druid mana hung the game forever',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const b = put(g, me, 'Walking Ballista', { p1: 1 });
+      me.floating = { G: 1e6 }; // stands in for the Druid loop
+      g.pingers(me, true);
+      const spent = 1e6 - me.floating.G, dead = g.players.slice(1).filter((o) => o.lost).length;
+      return { ok: spent < 1000 && dead === 3, note: `spent ${spent} mana, ${dead} of 3 opponents pinged out` };
+    },
+  },
+  {
     card: 'Teferi, Hero of Dominaria', title: '+1 untaps two lands at the beginning of the end step, not right away',
     wrong: 'the lands untapped at once, so the main phase got two extra mana',
     run({ table, put }) {

@@ -46,6 +46,7 @@ function play(n, seed0, nn, explore) {
   for (let g = 0; g < n; g++) {
     const pod = R.shuffle(decks.slice()).slice(0, 4);
     const game = new Game(pod, db, seed0 + g, { record: false, collect: true, nn, explore }).run();
+    if (game.runaway) console.log(`    game ${seed0 + g} got stuck in a loop and was called a draw (${pod.map((d) => d.id).join(', ')})`);
     const y = (seat) => (game.winner === seat ? 1 : game.winner == null ? 0.25 : 0);
     for (const s of game.samples) out.push(...toQ(s, y(s.seat)));
     for (const h of game.mullSamples) hands.push({ d: h.d.slice(0, 11).concat(deckOneHot(h.deck)), s: h.names.map((nm) => vIdx.get(nm)).filter((k) => k != null), y: y(h.seat) });

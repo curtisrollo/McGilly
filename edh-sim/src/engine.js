@@ -878,6 +878,8 @@
   }
 
   // ---------- Game ----------
+  // Thrown when a game makes far more mana payments than any real game (a loop the AI can't get out of)
+  class Runaway extends Error {}
   class Game {
     constructor(decks, db, seed, opts = {}) {
       this.db = db;
@@ -890,6 +892,7 @@
       this.turn = 0;
       this.round = 0;
       this.maxRounds = opts.maxRounds || 30;
+      this.steps = 0;
       this.players = decks.map((d, i) => this.makePlayer(d, i));
       this.active = 0;
       this.winner = null;
@@ -1833,6 +1836,7 @@
 
     // Attempt to pay; returns plan or null. If commit, taps sources.
     pay(p, cost, xVal = 0, commit = false, extraGeneric = 0) {
+      if (++this.steps > Game.STEP_LIMIT) throw new Runaway(); // see run(): a game stuck in a loop is called a draw
       const srcs = this.sources(p).map((s) => ({ ...s, used: false }));
       const pool = { ...(p.floating || {}) }; // mana already floating, plus extra from multi-amount sources
       if (p.pool) pool.ANY = (pool.ANY || 0) + p.pool;
@@ -2670,7 +2674,8 @@
         case 'archfiend': { for (const o of this.opps(p)) if (o.lostTurn === this.turn && o.lostThis > 0) { const n = o.lostThis; this.loseLife(o, n, src); this.emit('drain', `Archfiend of Despair: ${o.name} loses another ${n}.`, { seat: p.seat, target: o.seat }); } this.checkState(); break; }
         case 'revealUntil': {
           let n = 0, hit = null;
-          while (p.library.length) { const c = p.library.shift(); n++; if (c.info.types.has('Artifact') && !c.info.isLand) { hit = c; break; } c.zone = 'library'; p.library.push(c); }
+          const size = p.library.length; // reveal each card once: with no artifact left this used to cycle the library forever
+          while (n < size) { const c = p.library.shift(); n++; if (c.info.types.has('Artifact') && !c.info.isLand) { hit = c; break; } c.zone = 'library'; p.library.push(c); }
           if (hit) { this.enterBattlefield(hit, p); this.emit('tutor', `${name} reveals ${n} cards and puts ${hit.info.name} onto the battlefield.`, { seat: p.seat, cards: [hit.id] }); }
           if (fx.selfDamage) this.loseLife(p, n);
           break;
@@ -3670,6 +3675,14 @@
       this.active = this.R.int(4);
       this.started = true;
       this.emit('start', `${this.P(this.active).name} goes first.`, { seat: this.active });
+      try { this.loop(); } catch (e) {
+        if (!(e instanceof Runaway)) throw e;
+        this.over = true; this.winner = null; this.timeout = true; this.runaway = true;
+        this.emit('win', `Game stopped: the AI got stuck repeating an action (${Game.STEP_LIMIT.toLocaleString()} mana payments). Called a draw.`);
+      }
+      return this;
+    }
+    loop() {
       let first = true;
       let lastSeat = -1;
       const order = (seat) => (seat - this.startSeat + 4) % 4;
@@ -4116,9 +4129,19 @@
     // Walking Ballista style: remove +1/+1 counters to ping
     pingers(p, second) {
       for (const c of p.bf.filter((x) => /Remove a \+1\/\+1 counter from CARDNAME: It deals 1 damage to any target/i.test(x.info.text || ''))) {
-        if (second && this.availableMana(p) >= 4 && /\{4\}: Put a \+1\/\+1 counter/i.test(c.info.text)) { while (this.pay(p, parseCost('4'))) { this.pay(p, parseCost('4'), 0, true); c.p1 += this.counterAmount(p, 1); } }
-        const q = this.opps(p).find((o) => this.scaleDamage(p.seat, o.seat, c.p1) >= o.life && o.protectedUntil < this.turn);
-        if (q) { const n = c.p1; c.p1 = 0; this.loseLife(q, this.scaleDamage(p.seat, q.seat, n), c); this.emit('damage', `${c.info.name} removes ${n} counters and pings ${q.name} to death.`, { seat: p.seat, cards: [c.id], target: q.seat }); this.checkState(); continue; }
+        // Stop once the counters could kill the whole table: with unlimited mana (Myrkul + Devoted Druid) this never ran out
+        const enough = this.opps(p).reduce((s, o) => s + Math.max(o.life, 0), 0) + 20;
+        if (second && this.availableMana(p) >= 4 && /\{4\}: Put a \+1\/\+1 counter/i.test(c.info.text)) { let n = 0; while (c.p1 < enough && n++ < 200 && this.pay(p, parseCost('4'))) { this.pay(p, parseCost('4'), 0, true); c.p1 += this.counterAmount(p, 1); } }
+        // Ping out every opponent the counters can kill (a huge Ballista off unlimited mana wins the game), least life first
+        let killed = false;
+        for (const q of this.opps(p).filter((o) => o.protectedUntil < this.turn).sort((a, b) => a.life - b.life)) {
+          if (q.lost || this.over) continue;
+          let n = 0; while (n < c.p1 && this.scaleDamage(p.seat, q.seat, n) < q.life) n++;
+          if (this.scaleDamage(p.seat, q.seat, n) < q.life) break;
+          c.p1 -= n; killed = true;
+          this.loseLife(q, this.scaleDamage(p.seat, q.seat, n), c); this.emit('damage', `${c.info.name} removes ${n} counters and pings ${q.name} to death.`, { seat: p.seat, cards: [c.id], target: q.seat }); this.checkState();
+        }
+        if (killed) continue;
         const t = this.bestOppTarget(p, (x) => x.info.isCreature && this.targetable(x, p) && this.toughness(x) - x.dmg <= Math.min(c.p1 - 1, 3) && this.creatureValue(x) >= 5);
         if (t && c.p1 > 1) { const need = this.toughness(t) - t.dmg; c.p1 -= need; t.dmg += this.scaleDamage(p.seat, t.ctrl, need); this.emit('removal', `${c.info.name} pings ${t.info.name}.`, { seat: p.seat, cards: [c.id, t.id], target: t.ctrl }); this.checkState(); }
       }
@@ -4982,6 +5005,7 @@
     }
   }
 
+  Game.STEP_LIMIT = 200000; // mana payments per game; real games use under 3,000
   Game.NN_CARD = 30;      // card features (see nnCard)
   Game.NN_STATE = 24;     // board features (see nnState)
   Game.NN_WEIGHT = 150;   // how much a 0.1 swing in win chance is worth when scoring a play

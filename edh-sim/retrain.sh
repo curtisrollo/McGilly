@@ -8,6 +8,8 @@ cd "$(dirname "$0")"
 GENS=${1:-4}; GAMES=${2:-800}; AB=${3:-2000}
 git pull -q --ff-only
 node train.mjs --fresh --gens "$GENS" --games "$GAMES" --ab "$AB" | tee train.log
+# tee hides train.mjs's exit code, so check it got as far as the A/B result before publishing anything
+grep -q "ALL " train.log || { echo "Training did not finish; nothing committed."; exit 1; }
 node validate.mjs --json data/validation.json > /dev/null
 node build.mjs
 git add data/nn.json data/validation.json dist/pod-night.html
