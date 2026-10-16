@@ -3112,13 +3112,13 @@
     }
     // How close a player is to winning: their board, the network's win chance, a combo one piece away, unlimited mana, poison and commander damage dealt
     threatOf(q) {
-      const key = q.seat + ':' + this._nnTick;
-      if (this._thr && this._thr.key === key) return this._thr.v;
+      if (!this._thr || this._thr.tick !== this._nnTick) this._thr = { tick: this._nnTick, v: {} }; // one score per player until the next event
+      if (this._thr.v[q.seat] != null) return this._thr.v[q.seat];
       let v = this.playerThreat(q) + q.hand.length * 1.5 + (q.infMana ? 50 : 0);
       if (this.nn) v += 100 * this.nnV(q);
       if (this.comboWants(q).some((w) => w.missing.length <= 1)) v += 25;
       for (const r of this.players) if (r !== q) { v += r.poison * 3; for (const c of q.bf.concat(q.command)) if (c.isCommander) v += (r.cmdDmg[c.id] || 0) * 1.2; }
-      this._thr = { key, v };
+      this._thr.v[q.seat] = v;
       return v;
     }
     // q's threat compared with p's other opponents (positive: q is the one to stop)
