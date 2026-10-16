@@ -10,6 +10,24 @@ import atraxa from './scenarios/atraxa.mjs';
 import beledros from './scenarios/beledros.mjs';
 const core = [
   {
+    card: 'Grand Abolisher', title: 'stays home to keep its protection, instead of attacking as a 2/2',
+    wrong: 'nothing marked it as worth more alive, so it attacked like any 2/2 (53 attacks in 200 games, now 11)',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; const a = put(g, me, 'Grand Abolisher'); put(g, opp, 'Vampire Nighthawk');
+      g.chooseDefender = () => opp; g.combat(me);
+      return { ok: a.zone === 'bf' && !a.tapped, note: a.tapped || a.zone !== 'bf' ? 'it attacked' : 'it stayed home' };
+    },
+  },
+  {
+    card: "Kaya's Ghostform", title: 'goes to the graveyard once the creature it enchanted has left',
+    wrong: 'it was put on a "drop later" list that nothing read, so it stayed on the battlefield attached to nothing',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const c = put(g, me, 'Vampire Nighthawk'); const a = put(g, me, "Kaya's Ghostform"); a.attached = c.id;
+      g.leaveBattlefield(c); c.zone = 'hand'; me.hand.push(c); g.checkState();
+      return { ok: a.zone === 'gy', note: `Ghostform is in: ${a.zone}` };
+    },
+  },
+  {
     card: 'Doubling Season', title: 'counters are doubled, not quadrupled',
     wrong: 'its token sentence also added a counter doubler, so counters came in at 4x',
     run({ table, put }) {

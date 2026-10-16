@@ -3,6 +3,19 @@ const ench = (p) => p.bf.filter((c) => c.info.types.has('Enchantment')).length;
 const myrkulTable = (table) => table(11, 5); // Myrkul's deck in seat 0
 export default [
   {
+    card: 'Yawgmoth, Thran Physician', title: 'drill: with Dictate of Erebos out, keeps sacrificing at 9 life to make every opponent sacrifice (seed 96395496)',
+    wrong: 'it never paid life below 10, and the edict from Dictate added nothing to the score, so it stopped with fodder left',
+    run({ table, put }) {
+      const g = myrkulTable(table); const [me, a, b] = g.players; me.life = 9; me.hand = [];
+      put(g, me, 'Yawgmoth, Thran Physician'); put(g, me, 'Dictate of Erebos');
+      g.addToken(me, { p: 1, t: 1, sub: 'Pest', colors: 'black green' }, 3, true);
+      for (const q of [a, b]) for (let i = 0; i < 3; i++) put(g, q, 'Vampire Nighthawk');
+      g.mainPhase(me, true);
+      const left = [a, b].map((q) => q.bf.filter((x) => x.info.isCreature).length);
+      return { ok: left.every((n) => n <= 1) && me.life >= 4, note: `opponents' creatures left: ${left.join(', ')}; life ${me.life}` };
+    },
+  },
+  {
     card: 'Academy Rector', title: 'dying with no Myrkul out, it exiles itself and puts an enchantment onto the battlefield',
     wrong: '(regression guard; was already right when checked) the search did not happen, or the Rector stayed in the graveyard',
     run({ table, put }) {

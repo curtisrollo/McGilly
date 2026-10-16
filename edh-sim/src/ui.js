@@ -282,16 +282,41 @@
     return MANA[cs[0]];
   }
 
+  // A permanent spell that resolves onto the battlefield stays where it was cast from (hand, command zone, graveyard)
+  // while it is on the stack, so it moves once, straight to the board. Countered spells, instants and sorceries still
+  // show on the stack in the middle of the table.
+  function resolvesToBoard(id, from) {
+    for (let j = from + 1; j < state.events.length && j < from + 40; j++) {
+      const sn = state.events[j].snap;
+      if ((sn.stack || []).includes(id)) continue;
+      return sn.players.some((pl) => pl.bf.some((b) => b.id === id));
+    }
+    return false;
+  }
+  function viewSnap(idx) {
+    const snap = state.events[idx].snap;
+    const prev = idx > 0 ? state.events[idx - 1].snap : null;
+    const keep = (snap.stack || []).filter((id) => prev && resolvesToBoard(id, idx));
+    if (!keep.length) return snap;
+    const players = snap.players.map((pl) => ({ ...pl, hand: pl.hand.slice(), command: pl.command.slice(), gy: pl.gy.slice() }));
+    for (const id of keep) {
+      const w = whereNow(id, prev) || [state.meta[id] ? state.meta[id].owner : 0, 'hand'];
+      const zone = { hand: 'hand', cmd: 'command', gy: 'gy' }[w[1]] || 'hand';
+      players[w[0]][zone].push(id);
+    }
+    return { ...snap, players, stack: snap.stack.filter((id) => !keep.includes(id)) };
+  }
+
   function render(prevIdx) {
     const ev = state.events[state.idx];
     if (!ev) return;
-    const snap = ev.snap;
+    const snap = viewSnap(state.idx);
     const g = state.game;
     const focus = new Set(ev.cards);
     state.tappedFor = new Set(ev.mana ? ev.mana.sources : []);
     const atk = new Set((snap.attackers || []).map((a) => a.id));
     const blk = new Set((snap.blockers || []).map((b) => b.id));
-    const prevSnap = prevIdx != null && state.events[prevIdx] ? state.events[prevIdx].snap : null;
+    const prevSnap = prevIdx != null && state.events[prevIdx] ? viewSnap(prevIdx) : null;
     // Visual effects: what changed on each permanent since the previous step (only when stepping forward)
     state.fx = new Map();
     const ghosts = {};

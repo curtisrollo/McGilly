@@ -112,6 +112,15 @@ export default [
     },
   },
   {
+    card: 'Hermit Druid', title: 'does not attack into a blocker that would kill it (seed 96395496)',
+    wrong: 'a 1/1 combo piece swung for 1 into an untapped Zulaport Cutthroat and traded; only creatures worth 6+ avoided trades',
+    run({ table, put }) {
+      const [g, me, opp] = setup(table); const d = put(g, me, 'Hermit Druid'); put(g, opp, 'Zulaport Cutthroat');
+      g.chooseDefender = () => opp; g.combat(me);
+      return { ok: d.zone === 'bf' && !d.tapped, note: d.zone !== 'bf' ? 'the Druid attacked and died' : d.tapped ? 'the Druid attacked' : 'the Druid stayed home' };
+    },
+  },
+  {
     card: 'Hermit Druid', title: 'with no basic land left in the library (and no Jace) it is not used',
     wrong: 'with Muldrotha out it milled the whole library and decked its controller',
     run({ table, put }) {

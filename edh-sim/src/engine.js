@@ -1305,7 +1305,7 @@
       for (const pl of this.players) for (const a of [...pl.bf]) {
         if (a.attached === c.id) {
           a.attachedWas = c.id;
-          if (a.info.isAura && !a.info.enchDies && !a.info.ghostform) { this.destroy(a, 'falls off', true); } else if (a.info.isAura) { this.pendingAuraDrop = this.pendingAuraDrop || []; this.pendingAuraDrop.push(a); a.attached = null; } else a.attached = null;
+          if (a.info.isAura && !a.info.enchDies && !a.info.ghostform) { this.destroy(a, 'falls off', true); } else a.attached = null; // enchDies / Ghostform auras trigger first; checkState then puts them in the graveyard
         }
       }
       if (c.attached && c.info.reanimAura) {
@@ -3277,6 +3277,8 @@
         }
         // equipment attached to something that is no longer a creature becomes unattached
         for (const c of this.allBf()) if (c.info.isEquipment && c.attached) { const t = this.cards[c.attached]; if (!t || t.zone !== 'bf' || !t.info.isCreature) { c.attached = null; } }
+        // an Aura attached to nothing goes to the graveyard (Kaya's Ghostform and Pattern of Rebirth used to stay after their creature left)
+        for (const c of this.allBf()) if (c.info.isAura && !c.info.reanimAura && !c.info.isCreature && (!c.attached || this.cards[c.attached]?.zone !== 'bf')) { c.attached = null; this.moveToGraveyard(c); changed = true; }
         // legend rule
         for (const q of this.alive()) {
           const seen = {};
@@ -4254,7 +4256,8 @@
       if (ab.tap && c.info.isCreature && !postCombat && !ab.preCombat && !loopNow && !this.hasKw(c, 'vigilance') && this.canAttack(c) && !bigAb) return null; // creatures prefer to attack first
       if (ab.sorcery && postCombat === undefined) return null;
       if (ab.minArtifacts && p.bf.filter((x) => x.info.types.has('Artifact')).length < ab.minArtifacts) return null;
-      if (ab.life && (p.life - ab.life < 10 || !this.canPayLife(p, ab.life))) return null;
+      // pay life down to 10, or down to 4 when each sacrifice makes the opponents sacrifice too (Dictate of Erebos)
+      if (ab.life && (p.life - ab.life < (ab.sacCreature && this.edictsPerDeath(p) ? 4 : 10) || !this.canPayLife(p, ab.life))) return null;
       if (ab.sacOther && !ab.sacArtifact && !ab.sacCreature && !ab.sacArtifactN) return null;
       if (ab.discard && p.hand.length < ab.discard + 1) return null;
       if ((ab.sacCreature || ab.discard) && !ab.fx.some((f) => ['draw', 'tutor', 'damage', 'removal', 'search', 'drain', 'tokens', 'proliferate', 'millPower'].includes(f.k))) return null;
@@ -4293,6 +4296,11 @@
     }
     // Creatures we are happy to sacrifice, cheapest first. With Myrkul out, nontoken creatures with
     // enters/static abilities come back as enchantment copies, so they are good fodder too.
+    // How many opponents lose a creature each time one of our creatures dies (Dictate of Erebos, Grave Pact)
+    edictsPerDeath(p) {
+      const n = p.bf.reduce((a, x) => a + (x.info.deathWatch || []).filter((w) => w.scope === 'mine' && w.fx.some((f) => f.k === 'edict')).length, 0);
+      return n ? n * this.opps(p).filter((q) => q.bf.some((x) => x.info.isCreature)).length : 0;
+    }
     sacFodder(p, outlet) {
       const myrkul = p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'));
       return p.bf.filter((x) => x !== outlet && x.info.isCreature && !x.isCommander && (x.token || this.creatureValue(x) < 5 || (myrkul && this.myrkulGain(x) > 0)))
@@ -4348,6 +4356,8 @@
       }
       const myrkul = p.bf.some((m) => m.info.triggers.some((t) => t.k === 'myrkul'));
       for (const x of fodder) s -= x.token ? 1 : Math.max(0, this.creatureValue(x) * 0.6 - (myrkul ? this.myrkulGain(x) : 0));
+      // Dictate of Erebos / Grave Pact: every creature of ours that dies takes one from each opponent who has one
+      s += fodder.filter((x) => x.info.isCreature).length * this.edictsPerDeath(p) * 7;
       s -= (ab.life || 0) * 0.4 + (cost.mv || 0) * 0.5 + (ab.discard || 0) * 3;
       // sacrificing the card itself costs what it's worth on the battlefield (a mana rock early on is worth a lot)
       if (ab.sac) s -= Math.max(3, this.permValue(c)) + (c.info.mana ? Math.max(0, 14 - this.round) : 0);
@@ -4689,7 +4699,8 @@
         if (lethalish) go = true;
         if (a.isCommander && !cheat && (badBlock || worstTrade) && !lethalish) go = false;
         // creatures that are worth more at home don't swing into risk: walls, damage sponges, engines, mana dorks
-        const defensive = a.info.statics.some((x) => x.k === 'palisade') || (at >= ap * 2 && ap <= 3) || a.info.mana || a.info.sacOutlet || a.info.statics.some((x) => ['anthem', 'debuff', 'tokenDouble', 'counterDouble', 'gisela', 'dmgTriple', 'allIndestructible'].includes(x.k)) || a.info.triggers.length || a.info.deathWatch.length;
+        const defensive = a.info.statics.some((x) => x.k === 'palisade') || (at >= ap * 2 && ap <= 3) || a.info.mana || a.info.sacOutlet || a.info.statics.some((x) => ['anthem', 'debuff', 'tokenDouble', 'counterDouble', 'gisela', 'dmgTriple', 'allIndestructible', 'abolisher'].includes(x.k)) || a.info.triggers.length || a.info.deathWatch.length
+          || (a.info.activated || []).some((x) => x.tap); // tap-ability creatures (Hermit Druid) are worth more untapped and alive than a point of damage
         if (defensive && !lethalish && !ak.has('vigilance') && !valueTrig && (able.length || ap <= 2)) go = false;
         if (ap <= 0 && !valueTrig) go = false;
         if (a.info.mustAttack || this._forceAttack) go = true;
