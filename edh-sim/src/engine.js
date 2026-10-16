@@ -945,9 +945,11 @@
     }
     // Is paying n life OK? Never if it kills us; otherwise only if we stay above the floor. When we are already
     // under the floor (dead on board anyway) small payments that might find an answer are still fine.
-    canPayLife(p, n) {
+    // winNow: the payment wins the game or strips the table bare, so any life we survive with is fine
+    canPayLife(p, n, winNow = false) {
       if (!n || n <= 0) return true;
       if (p.life - n < 1) return false;
+      if (winNow) return true;
       if (this.has(p, 'staff') && p.life > 500) return true;
       const floor = this.lifeFloor(p);
       if (p.life > floor) return p.life - n > floor;
@@ -1988,7 +1990,7 @@
           if (l) { this.removeFrom(q.hand, l); this.enterBattlefield(l, q, { quiet: true }); this.emit('land', `Archaeomancer's Map: ${q.name} puts ${l.info.name} onto the battlefield.`, { seat: q.seat, cards: [l.id] }); }
         }
         for (const g of [...p.gy]) if (g.info.gyLandfall) { this.removeFrom(p.gy, g); this.enterBattlefield(g, p, { quiet: true }); this.emit('reanimate', `${g.info.name} returns from the graveyard (landfall).`, { seat: p.seat, cards: [g.id] }); }
-        if (c.info.shock) { const n = /pay 3 life/i.test(c.info.text || '') ? 3 : 2; if (this.canPayLife(p, n) && p.life > 12 && this.wantUntappedLand(p, c)) this.loseLife(p, n); else c.tapped = true; }
+        if (c.info.shock) { const n = /pay 3 life/i.test(c.info.text || '') ? 3 : 2; if (this.canPayLife(p, n) && this.wantUntappedLand(p, c)) this.loseLife(p, n); else c.tapped = true; }
         if (c.info.fetch) {
           const ok = (land) => land.info.isLand && c.info.fetch.types.some((tp) => tp === 'basic land' ? land.info.types.has('Basic') : tp === 'land' ? true : land.info.subtypes.includes(cap(tp)) || (tp.includes('basic') && land.info.types.has('Basic')));
           const want = p.library.filter(ok);
@@ -3022,7 +3024,7 @@
       const card = owner.hand.find((c) => c.info.redirect && ((c.info.freeIfCommander && owner.bf.some((x) => x.isCommander)) || this.pay(owner, c.info.cost)));
       if (!card) return false;
       if (!(card.info.freeIfCommander && owner.bf.some((x) => x.isCommander))) this.pay(owner, card.info.cost, 0, true);
-      if (/pay 5 life or pay \{2\}/i.test(card.info.text || '')) { if (owner.life > 15) this.loseLife(owner, 5); }
+      if (/pay 5 life or pay \{2\}/i.test(card.info.text || '')) { if (this.canPayLife(owner, 5)) this.loseLife(owner, 5); }
       this.discardCard(owner, card);
       const newT = caster.bf.filter((c) => !c.info.isLand).sort((a, b) => this.permValue(b) - this.permValue(a))[0];
       this.emit('response', `${owner.name} redirects it with ${card.info.name}${newT ? ' onto ' + caster.name + "'s " + newT.info.name : ''}!`, { seat: owner.seat, cards: [card.id].concat(newT ? [newT.id] : []) });
@@ -3571,7 +3573,7 @@
       if (!k) return true;
       const others = p.hand.filter((x) => x !== c);
       if (k === 'discard1' || k === 'discard2') { const n = k === 'discard2' ? 2 : 1; if (others.length < n) return false; if (commit) for (let i = 0; i < n; i++) { const d = others.filter((x) => p.hand.includes(x)).sort((a, b) => this.cardValue(p, a) - this.cardValue(p, b))[0]; this.discardCard(p, d); } return true; }
-      if (k === 'discardOrLife3') { if (this.canPayLife(p, 3) && p.life > 10) { if (commit) this.loseLife(p, 3); return true; } if (!others.length) return false; if (commit) { const d = others.slice().sort((a, b) => this.cardValue(p, a) - this.cardValue(p, b))[0]; this.discardCard(p, d); } return true; }
+      if (k === 'discardOrLife3') { if (this.canPayLife(p, 3)) { if (commit) this.loseLife(p, 3); return true; } if (!others.length) return false; if (commit) { const d = others.slice().sort((a, b) => this.cardValue(p, a) - this.cardValue(p, b))[0]; this.discardCard(p, d); } return true; }
       if (k === 'sacCreature') { const f = p.bf.filter((x) => x.info.isCreature && !x.isCommander).sort((a, b) => this.creatureValue(a) - this.creatureValue(b))[0]; if (!f || this.creatureValue(f) > 6) return false; if (commit) this.destroy(f, 'sacrificed', true); return true; }
       if (k === 'sacLand') { const f = p.bf.filter((x) => x.info.isLand).sort((a, b) => this.landValue(p, a) - this.landValue(p, b))[0]; if (!f) return false; if (commit) this.destroy(f, 'sacrificed', true); return true; }
       return true;
@@ -3835,7 +3837,7 @@
         if (c.info.cumulativeLife) {
           c.age = (c.age || 0) + 1;
           const cost = c.age * c.info.cumulativeLife;
-          if (this.canPayLife(p, cost) && p.life - cost > 12) { this.loseLife(p, cost); this.emit('effect', `${p.name} pays ${cost} life to keep ${c.info.name}.`, { seat: p.seat, cards: [c.id] }); }
+          if (this.canPayLife(p, cost)) { this.loseLife(p, cost); this.emit('effect', `${p.name} pays ${cost} life to keep ${c.info.name}.`, { seat: p.seat, cards: [c.id] }); }
           else { this.destroy(c, 'sacrificed', true); this.emit('effect', `${p.name} lets ${c.info.name} go.`, { seat: p.seat, cards: [c.id] }); }
         }
         if (c.harnessed && c.info.harness.upkeep) this.resolveEffects(p, c.info.harness.upkeep, c, `${c.info.name} (harnessed)`);
@@ -3862,13 +3864,13 @@
           const thisTurn = drawn.concat(p.hand.filter((c) => before.has(c)).slice(-1));
           const ranked = thisTurn.slice().sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a));
           let paid = 0;
-          const back = ranked.slice(1).filter((c) => { if (this.cardValue(p, c) >= 8 && this.canPayLife(p, 4 * (paid + 1)) && p.life > 20) { paid++; return false; } return true; }).slice(0, 2);
+          const back = ranked.slice(1).filter((c) => { if (this.cardValue(p, c) >= 8 && this.canPayLife(p, 4 * (paid + 1))) { paid++; return false; } return true; }).slice(0, 2);
           for (const c of back.reverse()) { this.removeFrom(p.hand, c); c.zone = 'library'; p.library.unshift(c); }
           if (paid) this.loseLife(p, 4 * paid);
           this.emit('draw', `Sylvan Library: ${p.name} draws two extra and ${paid ? `pays ${4 * paid} life to keep ${paid}` : 'puts two back'}.`, { seat: p.seat });
         }
       }
-      if (this.has(p, 'necro') && p.life > 14 && this.canPayLife(p, 1)) { const n = Math.min(p.life - 14, 6, Math.max(0, Math.floor(p.life - this.lifeFloor(p) - 1)));
+      if (this.has(p, 'necro') && this.canPayLife(p, 1)) { const n = Math.min(6, Math.max(0, Math.floor(p.life - this.lifeFloor(p) - 1)));
         if (n > 0) { this.loseLife(p, n); const got = p.library.splice(0, n); for (const c of got) { c.zone = 'exile'; } p.necroPending = (p.necroPending || []).concat(got); this.emit('draw', `${p.name} pays ${n} life to Necropotence (cards arrive at end of turn).`, { seat: p.seat }); } }
       for (const c of [...p.bf]) if (c.info.saga) {
         c.lore = (c.lore || 0) + 1;
@@ -3952,7 +3954,7 @@
       const modes = [];
       // each mode costs life (1, 2, 3): only the ones we can afford without walking into lethal
       let cost = 0;
-      for (const [m, n, min] of [['treasure', 1, 8], ['draw', 2, 14], ['merc', 3, 22]]) if (p.life > min && this.canPayLife(p, cost + n)) { modes.push(m); cost += n; }
+      for (const [m, n] of [['treasure', 1], ['draw', 2], ['merc', 3]]) if (this.canPayLife(p, cost + n)) { modes.push(m); cost += n; }
       for (const m of modes) {
         if (m === 'treasure') { this.addToken(p, { treasure: true }, 1, true); this.loseLife(p, 1); }
         if (m === 'draw') { this.draw(p, 1); this.loseLife(p, 2); }
@@ -4256,8 +4258,7 @@
       if (ab.tap && c.info.isCreature && !postCombat && !ab.preCombat && !loopNow && !this.hasKw(c, 'vigilance') && this.canAttack(c) && !bigAb) return null; // creatures prefer to attack first
       if (ab.sorcery && postCombat === undefined) return null;
       if (ab.minArtifacts && p.bf.filter((x) => x.info.types.has('Artifact')).length < ab.minArtifacts) return null;
-      // pay life down to 10, or down to 4 when each sacrifice makes the opponents sacrifice too (Dictate of Erebos)
-      if (ab.life && (p.life - ab.life < (ab.sacCreature && this.edictsPerDeath(p) ? 4 : 10) || !this.canPayLife(p, ab.life))) return null;
+      if (ab.life && !this.canPayLife(p, ab.life, this.abilityWinsNow(p, ab, c))) return null; // keeps us above what the table can hit us for, unless this wins
       if (ab.sacOther && !ab.sacArtifact && !ab.sacCreature && !ab.sacArtifactN) return null;
       if (ab.discard && p.hand.length < ab.discard + 1) return null;
       if ((ab.sacCreature || ab.discard) && !ab.fx.some((f) => ['draw', 'tutor', 'damage', 'removal', 'search', 'drain', 'tokens', 'proliferate', 'millPower'].includes(f.k))) return null;
@@ -4296,6 +4297,16 @@
     }
     // Creatures we are happy to sacrifice, cheapest first. With Myrkul out, nontoken creatures with
     // enters/static abilities come back as enchantment copies, so they are good fodder too.
+    // Paying life is fine down to 1 when the ability wins: its drain or damage kills an opponent, or (Dictate of Erebos)
+    // our sacrifices are enough to take every creature the opponents have, so nothing is left to hit us back
+    abilityWinsNow(p, ab, c) {
+      const hit = ab.fx.reduce((a, f) => a + (f.k === 'drain' || f.k === 'damage' ? this.fxNum(p, f.n, 1) : 0), 0);
+      if (hit && this.opps(p).some((q) => q.life <= hit)) return true;
+      if (!ab.sacCreature) return false;
+      const edicts = p.bf.reduce((a, x) => a + (x.info.deathWatch || []).filter((w) => w.scope === 'mine' && w.fx.some((f) => f.k === 'edict')).length, 0);
+      const fodder = this.sacFodder(p, c).length;
+      return edicts > 0 && this.opps(p).every((q) => q.bf.filter((x) => x.info.isCreature).length <= fodder * edicts);
+    }
     // How many opponents lose a creature each time one of our creatures dies (Dictate of Erebos, Grave Pact)
     edictsPerDeath(p) {
       const n = p.bf.reduce((a, x) => a + (x.info.deathWatch || []).filter((w) => w.scope === 'mine' && w.fx.some((f) => f.k === 'edict')).length, 0);
@@ -4464,7 +4475,7 @@
     // Beledros: pay 10 life to untap every land, when that unlocks a big play the AI wants (and the life is safe to pay)
     beledrosUntap(p) {
       const bel = p.bf.find((c) => c.info.beledros);
-      if (!bel || bel.usedTurn === this.turn || p.life < 20 || !this.canPayLife(p, 10)) return false;
+      if (!bel || bel.usedTurn === this.turn || !this.canPayLife(p, 10)) return false;
       const tappedLands = p.bf.filter((c) => c.info.isLand && c.tapped);
       if (tappedLands.length < 3) return false;
       const before = new Set(this.castOptions(p).map((o) => o.c.id));
@@ -4957,7 +4968,7 @@
       this._combatDealt = dmg;
       if (this.isType(a, 'Human') && this.has(q, 'humanBane')) { this.destroy(a); }
       this.sowerEcho(q, dmg);
-      if (p !== q) for (const x of p.bf) for (const t of x.info.triggers) if (t.k === 'gix' && p.life > 5 && this.canPayLife(p, 1)) { this.loseLife(p, 1); this.draw(p, 1); this.emit('draw', `Gix: ${p.name} pays 1 life and draws.`, { seat: p.seat, cards: [x.id] }); }
+      if (p !== q) for (const x of p.bf) for (const t of x.info.triggers) if (t.k === 'gix' && this.canPayLife(p, 1)) { this.loseLife(p, 1); this.draw(p, 1); this.emit('draw', `Gix: ${p.name} pays 1 life and draws.`, { seat: p.seat, cards: [x.id] }); }
       let n;
       if (this.hasKw(a, 'infect')) { q.poison += dmg; n = dmg; } else n = this.loseLife(q, dmg, a);
       tally(n);

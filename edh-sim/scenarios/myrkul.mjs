@@ -3,8 +3,21 @@ const ench = (p) => p.bf.filter((c) => c.info.types.has('Enchantment')).length;
 const myrkulTable = (table) => table(11, 5); // Myrkul's deck in seat 0
 export default [
   {
-    card: 'Yawgmoth, Thran Physician', title: 'drill: with Dictate of Erebos out, keeps sacrificing at 9 life to make every opponent sacrifice (seed 96395496)',
-    wrong: 'it never paid life below 10, and the edict from Dictate added nothing to the score, so it stopped with fodder left',
+    card: 'Yawgmoth, Thran Physician', title: 'drill: at 5 life, pays down to 2 when Dictate of Erebos sacrifices take every creature the opponents have',
+    wrong: 'the life floor counted the attackers it was about to remove, so it stopped at 3 with the opponents still holding creatures',
+    run({ table, put }) {
+      const g = myrkulTable(table); const [me, a, b] = g.players; me.life = 5; me.hand = [];
+      put(g, me, 'Yawgmoth, Thran Physician'); put(g, me, 'Dictate of Erebos');
+      g.addToken(me, { p: 1, t: 1, sub: 'Pest', colors: 'black green' }, 3, true);
+      for (const q of [a, b]) for (let i = 0; i < 3; i++) put(g, q, 'Bloodgift Demon');
+      g.mainPhase(me, true);
+      const left = [a, b].map((q) => q.bf.filter((x) => x.info.isCreature).length);
+      return { ok: left.every((n) => n === 0) && me.life >= 1 && !me.lost, note: `opponents' creatures left: ${left.join(', ')}; life ${me.life}` };
+    },
+  },
+  {
+    card: 'Yawgmoth, Thran Physician', title: 'drill: with Dictate of Erebos out, keeps sacrificing at 9 life while the table cannot kill it (seed 96395496)',
+    wrong: 'a fixed rule stopped it paying life below 10 even with no threats on board, and the edict from Dictate added nothing to the score',
     run({ table, put }) {
       const g = myrkulTable(table); const [me, a, b] = g.players; me.life = 9; me.hand = [];
       put(g, me, 'Yawgmoth, Thran Physician'); put(g, me, 'Dictate of Erebos');
