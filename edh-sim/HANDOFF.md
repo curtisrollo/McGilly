@@ -23,7 +23,8 @@ a heuristic AI steered by a small neural network, and a single-page web app publ
 - Win rates: play N four-player games with random pods and count winners per deck (25% is an even share).
 
 ## Where things stand
-- Latest network: 4 gens x 800 games; A/B 26.2% with vs 24.6% without (2000 games).
+- Latest network: 6 gens x 1500 games; A/B 26.2% with vs 24.6% without (3000 games), the same as the 4 x 800 run before it,
+  so more games alone no longer help. Bigger gains need the network to steer more decisions (combat, targeting).
 - Win rates (400 games): Edgar 35, Beledros 33, Kaalia 28, Atraxa 28, Myrkul 22, Muldrotha 17, Osgir 11.
   The engine decks still die to fast aggro before their engines come online.
 - Recent AI work: look-ahead on engine turns, attack/removal targeting by threat, wipes held for real trades or danger,
@@ -31,6 +32,5 @@ a heuristic AI steered by a small neural network, and a single-page web app publ
 
 ## Open ideas
 - Parallelise training across CPU cores (worker threads) to make bigger runs cheap.
-- Bigger training run: `sh retrain.sh 6 1500 3000`.
 - Remaining small audit items: Staff of Domination untap creature, Goblin Welder on opponents' artifacts, Lattice colour
   changes, Yawgmoth -1/-1 setup for proliferate, Academy Rector trigger ordering with Myrkul.
