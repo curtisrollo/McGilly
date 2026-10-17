@@ -878,7 +878,7 @@
   }
 
   // ---------- Game ----------
-  // Thrown when a game makes far more mana payments than any real game (a loop the AI can't get out of)
+  // Thrown when a game makes far more mana payments and permanents than any real game (a loop the AI can't get out of)
   class Runaway extends Error {}
   class Game {
     constructor(decks, db, seed, opts = {}) {
@@ -1967,6 +1967,7 @@
 
     // ----- battlefield entry -----
     enterBattlefield(c, p, o = {}) {
+      if (++this.steps > Game.STEP_LIMIT) throw new Runaway(); // permanents entering count toward the runaway limit too (a token loop hung training)
       // a card is only ever in one place: take it out of whatever zone still holds it
       for (const q of this.players) for (const z of ['hand', 'gy', 'exile', 'library', 'command']) if (q[z].includes(c)) this.removeFrom(q[z], c);
       c.zone = 'bf'; c.ctrl = p.seat; c.sick = true; c.tapped = !!o.tapped; c.dmg = 0;
@@ -2745,7 +2746,9 @@
           if (!c) break;
           if (costOf(c)) this.pay(p, parseCost(String(costOf(c))), 0, true);
           this.removeFrom(p.gy, c); c.zone = 'exile'; p.exile.push(c);
-          for (let i = 0; i < 2 * this.tokenMult(p); i++) {
+          // counted once and capped like any token effect: a copied token doubler doubled the count on every pass (hung training)
+          const n = Math.min(2 * this.tokenMult(p), Math.max(0, 80 - p.bf.filter((x) => x.token).length));
+          for (let i = 0; i < n; i++) {
             const t = this.makeToken(p, { sub: 'copy' }); t.info = c.info; t.name = c.info.name; t.copiedFrom = null;
             this.enterBattlefield(t, p, { quiet: true });
           }
@@ -3782,7 +3785,7 @@
       try { this.loop(); } catch (e) {
         if (!(e instanceof Runaway)) throw e;
         this.over = true; this.winner = null; this.timeout = true; this.runaway = true;
-        this.emit('win', `Game stopped: the AI got stuck repeating an action (${Game.STEP_LIMIT.toLocaleString()} mana payments). Called a draw.`);
+        this.emit('win', `Game stopped: the AI got stuck repeating an action (${Game.STEP_LIMIT.toLocaleString()} payments and permanents). Called a draw.`);
       }
       return this;
     }

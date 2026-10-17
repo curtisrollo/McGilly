@@ -3,6 +3,17 @@ const OSG = 6; // decks/ index of osgir.txt: table(11, OSG) seats the Osgir deck
 const libClear = (p) => { for (const c of p.library) c.zone = 'exile'; p.library = []; };
 export default [
   {
+    card: 'Osgir, the Reconstructor', title: 'token copies are counted once and capped, even when the copies double tokens',
+    wrong: 'the loop re-read the token multiplier on every pass, so copies of a token doubler made it endless (hung an overnight training run)',
+    run({ table, put, card }) {
+      const g = table(11, 6); const me = g.players[0]; put(g, me, 'Osgir, the Reconstructor'); const art = card(g, me, 'Sol Ring', 'gy');
+      let k = 0; g.tokenMult = () => 2 ** Math.min(30, ++k); // grows every time it is asked, like copies of a doubler entering
+      g.resolveEffect(me, { k: 'osgir' }, null, 0, true);
+      const toks = me.bf.filter((c) => c.token).length;
+      return { ok: art.zone === 'exile' && toks > 0 && toks <= 80, note: `${toks} token copies (multiplier asked ${k} times)` };
+    },
+  },
+  {
     card: 'Aetherflux Reservoir', title: 'at 898 life, pays 50 to shoot a player on 23 (mistake-finder, seed 100072)',
     wrong: 'damage abilities scored a flat +5 and 50 life cost -20 whatever the life total, so it was never used',
     run({ table, put }) {
