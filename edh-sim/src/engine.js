@@ -2254,12 +2254,7 @@
           break;
         }
         case 'removal': {
-          const pred = {
-            creature: (c) => c.info.isCreature, creaturepw: (c) => c.info.isCreature || c.info.isPW, nonland: (c) => !c.info.isLand,
-            artifact: (c) => c.info.types.has('Artifact'), enchantment: (c) => c.info.types.has('Enchantment'),
-            artench: (c) => c.info.types.has('Artifact') || c.info.types.has('Enchantment'), planeswalker: (c) => c.info.isPW,
-            nonlandNonPW: (c) => !c.info.isLand && !c.info.isPW, permanent: () => true, tappedCreature: (c) => c.info.isCreature && c.tapped, colored: (c) => !c.info.isLand && c.info.colors && c.info.colors.size > 0,
-          }[fx.what] || ((c) => !c.info.isLand);
+          const pred = this.removalPred(fx.what);
           const destroys = !fx.tuck && !fx.bounce && !fx.shrink && !fx.exile; // "destroy" can't touch an indestructible one: pick another (Aura Shards kept aiming at The Soul Stone)
           const tgt = src && src._target ? src._target : this.bestOppTarget(p, (c) => pred(c) && this.targetable(c, p) && !(destroys && (this.hasKw(c, 'indestructible') || c.indestructibleEOT)));
           if (!tgt || tgt.zone !== 'bf') break;
@@ -3158,9 +3153,33 @@
       let best = null, bestV = 2;
       for (const q of this.opps(p)) {
         const lead = this.politics ? this.relThreat(p, q) * 0.1 * (this.politics / 40) : this.playerThreat(q) * 0.05; // removal leans toward the leader's permanents
-        for (const c of q.bf) if (pred(c)) { const v = this.permValue(c) + lead - this.wardCost(p, c); if (v > bestV) { best = c; bestV = v; } }
+        for (const c of q.bf) if (pred(c)) { const v = this.permValue(c) + lead - this.wardCost(p, c) + this.lockValue(p, c); if (v > bestV) { best = c; bestV = v; } }
       }
       return best;
+    }
+    // what a removal effect can hit ("destroy target creature", "exile target nonland permanent", ...)
+    removalPred(what) {
+      return {
+          creature: (c) => c.info.isCreature, creaturepw: (c) => c.info.isCreature || c.info.isPW, nonland: (c) => !c.info.isLand,
+          artifact: (c) => c.info.types.has('Artifact'), enchantment: (c) => c.info.types.has('Enchantment'),
+          artench: (c) => c.info.types.has('Artifact') || c.info.types.has('Enchantment'), planeswalker: (c) => c.info.isPW,
+          nonlandNonPW: (c) => !c.info.isLand && !c.info.isPW, permanent: () => true, tappedCreature: (c) => c.info.isCreature && c.tapped, colored: (c) => !c.info.isLand && c.info.colors && c.info.colors.size > 0,
+        }[what] || ((c) => !c.info.isLand);
+    }
+    // Lock pieces: an opponent's permanent whose static ability is what stops p's plan. Worth that much to remove.
+    // Protection from creatures (Serra's Emissary) or a Glacial Chasm blanks our whole attack; "opponents can't win"
+    // (Platinum Angel) stops every win; an attack tax (Sphere of Safety) chokes attacks; "can't respond" pieces hurt less.
+    lockValue(p, c) {
+      if (c.ctrl === p.seat || c.zone !== 'bf') return 0;
+      let v = 0;
+      const attack = () => Math.min(60, p.bf.filter((x) => x.info.isCreature).reduce((a, x) => a + Math.max(0, this.power(x)), 0));
+      for (const st of c.info.statics) {
+        if (st.k === 'emissary' || st.k === 'chasm') v += 10 + attack();
+        else if (st.k === 'platinum') v += 50;
+        else if (st.k === 'sphere') v += Math.min(25, p.bf.filter((x) => x.info.isCreature).length * 3);
+        else if (st.k === 'abolisher' || st.k === 'raveler') v += 6;
+      }
+      return v;
     }
     // What targeting c costs us on top of the spell: its ward. Infinity when we can't (or shouldn't) pay it.
     wardCost(p, c, src = null) {
@@ -3268,7 +3287,10 @@
     chooseTutor(p, what) {
       const pool = p.library.filter((c) => (what === 'manaArtifact' && c.info.isLand ? c.info.types.has('Basic') && !p.library.some((x) => x.info.types.has('Artifact') && x.info.mana) : !c.info.isLand) && (what === 'card' || (what === 'manaArtifact' && ((c.info.types.has('Artifact') && c.info.mana) || c.info.isLand)) || (what === 'creature' && c.info.isCreature) || (what.includes('artifact') && c.info.types.has('Artifact')) || (what.includes('enchantment') && c.info.types.has('Enchantment')) || (what.includes('instant') && (c.info.isInstant || c.info.isSorcery))));
       if (!pool.length) return null;
+      // locked out (Serra's Emissary against our board): a combo piece only beats the answer if it completes the combo
+      const lockTop = Math.max(0, ...this.opps(p).flatMap((q) => q.bf).map((x) => this.lockValue(p, x)));
       for (const w of this.comboWants(p)) {
+        if (lockTop >= 30 && w.missing.length > 1) continue;
         const lib = w.missing.find((m) => m.zone === 'lib' && pool.some((c) => c.name === m.name));
         if (lib) return pool.find((c) => c.name === lib.name);
       }
@@ -3279,10 +3301,14 @@
       if (bond && haveHalf) return bond;
       const opp = this.opps(p).map((q) => this.playerThreat(q)).sort((a, b) => b - a)[0] || 0;
       const mine = this.playerThreat(p);
+      // an answer to whatever is locking us out (Serra's Emissary against a big board) beats general value
+      const locks = this.opps(p).flatMap((q) => q.bf).filter((x) => this.lockValue(p, x) > 0 && this.targetable(x, p));
+      const answers = (c) => { if (!locks.length) return 0; const fx = c.info.spell.concat(c.info.etb || []).filter((f) => f.k === 'removal'); return Math.max(0, ...fx.flatMap((f) => locks.filter(this.removalPred(f.what)).map((x) => this.lockValue(p, x)))); };
+      const ans = new Map(pool.map((c) => [c, answers(c)]));
       return pool.slice().sort((a, b) => {
         const la = this.nnAdv(p, a, 'hand') * Game.NN_WEIGHT, lb = this.nnAdv(p, b, 'hand') * Game.NN_WEIGHT;
-        const sa = la + this.cardValue(p, a) - Math.max(0, a.info.mv - avail) * 3 + (opp > mine + 15 && a.info.spell.some((f) => f.k === 'wipe') ? 20 : 0);
-        const sb = lb + this.cardValue(p, b) - Math.max(0, b.info.mv - avail) * 3 + (opp > mine + 15 && b.info.spell.some((f) => f.k === 'wipe') ? 20 : 0);
+        const sa = la + this.cardValue(p, a) - Math.max(0, a.info.mv - avail) * 3 + (opp > mine + 15 && a.info.spell.some((f) => f.k === 'wipe') ? 20 : 0) + ans.get(a);
+        const sb = lb + this.cardValue(p, b) - Math.max(0, b.info.mv - avail) * 3 + (opp > mine + 15 && b.info.spell.some((f) => f.k === 'wipe') ? 20 : 0) + ans.get(b);
         return sb - sa;
       })[0];
     }

@@ -10,6 +10,30 @@ import atraxa from './scenarios/atraxa.mjs';
 import beledros from './scenarios/beledros.mjs';
 const core = [
   {
+    card: "Serra's Emissary", title: 'a lock piece: with a big board, a tutor fetches removal that can hit it',
+    wrong: 'tutors picked general value; nothing knew the Emissary (protection from creatures) was what stopped the attack',
+    run({ table, put, card }) {
+      const g = table(11, 2); const [me, opp] = g.players; me.hand = [];
+      for (const n of ['Old Gnawbone', 'Vilis, Broker of Blood', 'Noxious Gearhulk']) put(g, me, n);
+      put(g, opp, "Serra's Emissary");
+      const pick = g.chooseTutor(me, 'card');
+      const hits = pick && pick.info.spell.concat(pick.info.etb || []).some((f) => f.k === 'removal' && g.removalPred(f.what)(opp.bf.find((x) => x.info.name === "Serra's Emissary")));
+      return { ok: !!hits, note: `tutored: ${pick ? pick.info.name : 'nothing'}` };
+    },
+  },
+  {
+    card: "Serra's Emissary", title: 'removal aims at the lock piece, not the biggest creature',
+    wrong: 'Swords to Plowshares went at the most valuable creature, leaving the Emissary to blank the whole attack',
+    run({ table, put, card }) {
+      const g = table(11, 2); const [me, opp] = g.players;
+      for (const n of ['Old Gnawbone', 'Vilis, Broker of Blood']) put(g, me, n);
+      const em = put(g, opp, "Serra's Emissary"); put(g, opp, 'Craterhoof Behemoth');
+      const sw = card(g, me, 'Swords to Plowshares', 'hand');
+      g.resolveEffects(me, sw.info.spell, sw, null, true);
+      return { ok: em.zone !== 'bf', note: `Emissary in ${em.zone}` };
+    },
+  },
+  {
     card: 'Vampire Nighthawk', title: 'split attack: flyers finish a player on 4 with no flying blockers while the rest hits the main target',
     wrong: 'every attacker went at one defender, so the player on 4 lived',
     run({ table, put }) {
