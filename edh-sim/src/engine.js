@@ -790,7 +790,7 @@
     "Agadeem's Awakening // Agadeem, the Undercrypt": (a, cover) => { a.spell = [{ k: 'agadeem' }]; cover(ALL); },
     "Assassin's Trophy": (a, cover) => { a.spell = [{ k: 'removal', what: 'nonland', comp: 'land', destroyComp: true }]; cover(ALL); },
     'Sword of Feast and Famine': (a, cover) => { a.statics = a.statics.filter((x) => x.k !== 'equipBuff'); a.statics.push({ k: 'equipBuff', p: 2, t: 2, kw: ['protection'], protect: ['B', 'G'] }); a.combatDmg = [{ k: 'discard', n: 1 }, { k: 'untapLands' }]; a.equipCombat = true; cover(ALL); },
-    'Sylvan Library': (a, cover) => { cover(ALL); },
+    'Sylvan Library': (a, cover) => { a.drawsPerTurn = 1; cover(ALL); }, // (the draw step does it, by name; this tells the AI what it is worth)
     'Tamiyo, Field Researcher': (a, cover) => { const t7 = a.loyaltyAbs.find((x) => x.delta === -7); if (t7) t7.fx = [{ k: 'draw', n: 3 }, { k: 'emblem', e: 'freeSpells' }]; a.loyaltyAbs[0].fx = [{ k: 'tamiyoWatch' }]; const m2 = a.loyaltyAbs.find((x) => x.delta === -2); if (m2) m2.fx = [{ k: 'freeze', n: 2 }]; cover(ALL); },
     'Tamiyo, the Moon Sage': (a, cover) => { a.loyaltyAbs[0].fx = [{ k: 'freeze', n: 1 }]; const m2 = a.loyaltyAbs.find((x) => x.delta === -2); if (m2) m2.fx = [{ k: 'drawTapped' }]; const ult = a.loyaltyAbs.find((x) => x.delta <= -8); if (ult) ult.fx = [{ k: 'emblem', e: 'tamiyo' }]; cover(ALL); },
     'Tatyova, Benthic Druid': (a, cover) => { a.statics = a.statics.filter((x) => x.k !== 'misc'); a.landfall = [[{ k: 'gain', n: 1 }, { k: 'draw', n: 1 }]]; cover(ALL); },
@@ -3505,6 +3505,8 @@
         if (f.k === 'doubleCounters') s += p.bf.reduce((a, x) => a + (x.p1 || 0) + (x.loyalty || 0), 0);
         if (f.k === 'copy') s += 0;
       }
+      // card-draw engines (Phyrexian Arena, Sylvan Library): a card every turn for the rest of the game, worth most early
+      { const per = (i.drawsPerTurn || 0) + i.upkeep.reduce((a, u) => a + (u.each ? 0 : u.fx.reduce((b, f) => b + (f.k === 'draw' ? +f.n || 1 : 0), 0)), 0); if (per && p.library.length > 15) s += per * Math.max(5, 16 - this.round); }
       // enchantress engines (Argothian Enchantress, Sythis, Eidolon of Blossoms, The Great Henge): the spell draws cards too
       { const extra = this.castDraws(p, c, true); if (extra) s += Math.min(extra, 4) * 4; }
       if (i.copy) { const pool = (i.copy.own ? p.bf : this.allBf()).filter((x) => (i.copy.what === 'artifact' ? x.info.types.has('Artifact') : x.info.isCreature || (i.copy.what === 'creaturepw' && x.info.isPW))); const best = Math.max(0, ...pool.map((x) => this.copyWorth(p, i, x))); if (best < 6 && !i.mana) return -1; s += best; }
@@ -3532,7 +3534,8 @@
       if (!this.payAdditional(p, c, false)) return -1;
       if (!i.isPermanent && fx.length === 0) s = 1; // unmodeled spell: cast it last
       // the neural network's opinion: how much casting this now moves our chance to win
-      if (this.nnOn(p)) { const adv = this.nnAdv(p, c, from); s += adv * Game.NN_WEIGHT; if (this.record) c._nnAdv = adv; }
+      // (with unlimited mana a spell costs nothing, so the network's view of spending on it doesn't apply)
+      if (this.nnOn(p) && p.infMana !== this.turn) { const adv = this.nnAdv(p, c, from); s += adv * Game.NN_WEIGHT; if (this.record) c._nnAdv = adv; }
       if (this.completesCombo(p, c)) s += 60;
       else if (this.comboWants(p).some((w) => w.missing.some((m) => m.name === c.name))) s += 15;
       // an Aura needs something to enchant (Pattern of Rebirth with no creature of ours is not castable)
@@ -4187,7 +4190,7 @@
         const abs = this.abilityOptions(p, second, used), ab = abs[0];
         // look ahead: when there is a real choice, try the best few plays on a copy of the game and keep the one whose turn ends best
         let pick = ab && (!options.length || ab.s > options[0].s) ? { ab } : options.length ? { o: this.bestSequence(p, options) } : null;
-        if (this.lookahead && !this._inLook && !p.infMana && (!this.lookSeats || this.lookSeats.includes(p.seat))) {
+        if (this.lookahead && !this._inLook && p.infMana !== this.turn && (!this.lookSeats || this.lookSeats.includes(p.seat))) {
           // abilities the rules would not use: the look-ahead plays each out and keeps it only if the turn ends clearly better
           const loose = this.looseLook === false || (this.looseSeats && !this.looseSeats.includes(p.seat)) ? [] : this.abilityOptions(p, second, used, true).filter((a) => !abs.some((b) => b.key === a.key));
           if (pick || loose.length) pick = this.lookPick(p, second, options, abs, pick, loose) || pick;

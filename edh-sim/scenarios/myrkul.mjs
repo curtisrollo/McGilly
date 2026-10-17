@@ -1,7 +1,19 @@
 // Scenarios for the myrkul deck. Same shape as ../scenarios.mjs.
+import fs from 'node:fs';
 const ench = (p) => p.bf.filter((c) => c.info.types.has('Enchantment')).length;
 const myrkulTable = (table) => table(11, 5); // Myrkul's deck in seat 0
 export default [
+  {
+    card: 'Sylvan Library', title: 'is cast with unlimited green mana (Myrkul + Devoted Druid), and valued as a card a turn',
+    wrong: 'its effect was coded by name with nothing the AI could value, so it scored below zero and stayed in hand',
+    run({ table, card, Game }) {
+      const g = myrkulTable(table); const me = g.players[0]; me.hand = []; const sl = card(g, me, 'Sylvan Library', 'hand');
+      if (fs.existsSync('data/nn.json')) g.nn = Game.loadNN(JSON.parse(fs.readFileSync('data/nn.json', 'utf8'))); // as on the page
+      me.infMana = g.turn; me.infColors = ['G'];
+      g.mainPhase(me, false);
+      return { ok: sl.zone === 'bf', note: `Sylvan Library is in ${sl.zone}` };
+    },
+  },
   {
     card: 'Yawgmoth, Thran Physician', title: 'drill: at 5 life, pays down to 2 when Dictate of Erebos sacrifices take every creature the opponents have',
     wrong: 'the life floor counted the attackers it was about to remove, so it stopped at 3 with the opponents still holding creatures',
