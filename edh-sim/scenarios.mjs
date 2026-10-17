@@ -10,6 +10,16 @@ import atraxa from './scenarios/atraxa.mjs';
 import beledros from './scenarios/beledros.mjs';
 const core = [
   {
+    card: 'Vampire Nighthawk', title: 'split attack: flyers finish a player on 4 with no flying blockers while the rest hits the main target',
+    wrong: 'every attacker went at one defender, so the player on 4 lived',
+    run({ table, put }) {
+      const g = table(); const [me, a, b] = g.players; put(g, me, 'Old Gnawbone'); put(g, me, 'Vampire Nighthawk'); put(g, me, 'Vampire Nighthawk');
+      b.life = 4; put(g, b, 'Noxious Gearhulk'); g.chooseDefender = () => a;
+      g.phase = 'combat'; g.combat(me);
+      return { ok: b.lost && a.life < 40, note: `player on 4: ${b.lost ? 'out' : b.life}; main target at ${a.life}` };
+    },
+  },
+  {
     card: 'Grand Abolisher', title: 'stays home to keep its protection, instead of attacking as a 2/2',
     wrong: 'nothing marked it as worth more alive, so it attacked like any 2/2 (53 attacks in 200 games, now 11)',
     run({ table, put }) {

@@ -4804,6 +4804,24 @@
       return best;
     }
 
+    // Split attacks: the attackers a second player can't block at all, sent at that player when they are enough to
+    // knock them out and the main target isn't dying to the full attack anyway. (The look-ahead tries wider splits.)
+    splitAttack(p, q, attackers, lethalish) {
+      if (lethalish || attackers.length < 2) return null;
+      for (const r of this.splitTargets(p, q).sort((a, b) => a.life - b.life)) {
+        const pick = [];
+        let dmg = 0;
+        for (const a of this.freeAgainst(r, attackers).sort((x, y) => this.power(y) - this.power(x))) { if (dmg >= r.life) break; pick.push(a); dmg += this.scaleDamage(p.seat, r.seat, this.power(a)); }
+        if (dmg >= r.life && pick.length < attackers.length) return { q: r, list: pick };
+      }
+      return null;
+    }
+    splitTargets(p, q) { return this.opps(p).filter((r) => r !== q && r.protectedUntil < this.turn && !this.has(r, 'chasm') && !this.has(r, 'emissary') && !this.has(r, 'sphere')); }
+    // attackers r has no untapped creature to block (flying over ground blockers, menace into one blocker, unblockable)
+    freeAgainst(r, attackers) {
+      const bl = r.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b));
+      return attackers.filter((a) => { if (a.info.attack.some((f) => f.k === 'cheatAttack')) return false; const can = bl.filter((b) => this.canBlock(b, a)).length; return can === 0 || (this.hasKw(a, 'menace') && can < 2); });
+    }
     combat(p) {
       if (p.lost || this.over) return;
       let cands = p.bf.filter((c) => this.canAttack(c));
@@ -4904,22 +4922,34 @@
       }
       // Look-ahead on the attack: when a creature could die to a block, play the combat out on copies of the game (the
       // defender blocks with its own logic) with and without each risky attacker, and with no attack, and keep the best.
-      if (this._forcedAtk) attackers.splice(0, attackers.length, ...this._forcedAtk.ids.map((id) => this.cards[id]).filter((c) => c && c.zone === 'bf' && this.canAttack(c)));
+      if (this._forcedAtk) attackers.splice(0, attackers.length, ...this._forcedAtk.ids.concat(this._forcedAtk.side ? this._forcedAtk.side.ids : []).map((id) => this.cards[id]).filter((c) => c && c.zone === 'bf' && this.canAttack(c)));
       else if (this.lookahead && !this._inLook && !this._forceAttack && attackers.length && this.looseLook !== false && (!this.looseSeats || this.looseSeats.includes(p.seat)) && (!this.lookSeats || this.lookSeats.includes(p.seat))) {
         const killedBy = (a) => blockers.some((b) => this.canBlock(b, a) && ((this.power(b) >= this.toughness(a) - a.dmg) || (this.hasKw(b, 'deathtouch') && this.power(b) > 0)) && !this.hasKw(a, 'indestructible'));
         const risky = attackers.filter(killedBy).sort((x, y) => this.creatureValue(y) - this.creatureValue(x)).slice(0, 3);
-        if (risky.length) {
-          const plans = [attackers.slice(), ...risky.map((r) => attackers.filter((a) => a !== r)), []];
+        const held = p.bf.filter((c) => !attackers.includes(c) && this.canAttack(c) && this.power(c) > 0).sort((x, y) => this.power(y) - this.power(x));
+        const others = this.splitTargets(p, q);
+        const freeSomewhere = others.some((r) => this.freeAgainst(r, attackers).length);
+        if (risky.length || held.length || freeSomewhere) {
+          // a plan: who attacks q, and optionally who goes at a second player
+          const P = (main, side = null) => Object.assign(main, { side });
+          const plans = [P(attackers.slice()), ...risky.map((r) => P(attackers.filter((a) => a !== r))), P([])];
+          if (held.length) { plans.push(P(attackers.concat(held))); for (const h of held.slice(0, 2)) plans.push(P(attackers.concat(h))); }
+          const sp = this.splitAttack(p, q, attackers, false);
+          if (sp) plans.push(P(attackers.filter((a) => !sp.list.includes(a)), { q: sp.q.seat, ids: sp.list.map((a) => a.id) }));
+          for (const r of others.slice(0, 2)) { const f = this.freeAgainst(r, attackers.concat(held)); if (f.length) plans.push(P(attackers.concat(held).filter((a) => !f.includes(a)), { q: r.seat, ids: f.map((a) => a.id) })); }
           const res = plans.map((plan) => {
             try {
               const g = this.cloneForLook(), pp = g.players[p.seat];
-              g._forcedAtk = { q: q.seat, ids: plan.map((a) => a.id) }; g.combat(pp); g._forcedAtk = null;
+              g._forcedAtk = { q: q.seat, ids: plan.map((a) => a.id), side: plan.side }; g.combat(pp); g._forcedAtk = null;
               if (!g.over && !pp.lost) { g.emptyPools(); g.phase = 'main 2'; g.mainPhase(pp, true); }
               return g.lookValue(g, p.seat);
             } catch (e) { return -Infinity; }
           });
           let bi = 0; for (let i = 1; i < res.length; i++) if (res[i] > res[bi]) bi = i;
-          if (bi > 0 && res[bi] > res[0] + 4) attackers.splice(0, attackers.length, ...plans[bi]);
+          if (!(bi > 0 && res[bi] > res[0] + 4)) bi = 0;
+          // whatever plan wins is what happens (the kept plan included: no split it wasn't judged with)
+          const pl = plans[bi], sideIds = new Set(pl.side ? pl.side.ids : []);
+          attackers.splice(0, attackers.length, ...pl, ...p.bf.filter((c) => sideIds.has(c.id) && !pl.includes(c))); this._planAtk = { side: pl.side };
           if (!attackers.length) return;
         }
       }
@@ -4956,11 +4986,24 @@
           assign.set(a.id, w.id); need -= this.power(a); pool.splice(pool.indexOf(a), 1);
         }
       }
+      // split attacks: some attackers go at a second player (the look-ahead's plan, or splitAttack's pick)
+      let side = null;
+      const plan = this._forcedAtk || this._planAtk; this._planAtk = null;
+      if (plan && plan.side) { const r = this.P(plan.side.q), ids = new Set(plan.side.ids), list = attackers.filter((a) => ids.has(a.id)); if (!r.lost && r !== q && list.length) side = { q: r, list }; }
+      else if (!plan && !this._newTargetOnly) side = this.splitAttack(p, q, attackers, lethalish);
+      const sideSet = new Set(side ? side.list : []);
+      for (const a of sideSet) assign.delete(a.id);
       for (const a of attackers) { if (!this.hasKw(a, 'vigilance')) a.tapped = true; a.attacking = true; }
       p.attackersTurn = this.turn; p.attackersCount = (p.attackersTurn === this.turn ? p.attackersCount || 0 : 0) + attackers.length;
-      const atkInfo = attackers.map((a) => ({ id: a.id, to: assign.get(a.id) || null }));
-      const atkNames = attackers.map((a) => { const w = assign.get(a.id); return `${this.cname(a)} ${this.power(a)}/${this.toughness(a)}${w ? ` → ${this.cards[w].info.name}` : ''}`; });
-      this.emit('attack', `${p.name} attacks ${q.name} with ${this.listNames(atkNames)} (${attackers.reduce((s, a) => s + this.power(a), 0)} power).`, { seat: p.seat, cards: attackers.map((a) => a.id), attackers: atkInfo, target: q.seat });
+      const announce = (qq, list, info) => {
+        const names = list.map((a) => { const w = assign.get(a.id); return `${this.cname(a)} ${this.power(a)}/${this.toughness(a)}${w ? ` → ${this.cards[w].info.name}` : ''}`; });
+        this.emit('attack', `${p.name} attacks ${qq.name} with ${this.listNames(names)} (${list.reduce((s, a) => s + this.power(a), 0)} power).`, { seat: p.seat, cards: list.map((a) => a.id), attackers: info, target: qq.seat });
+      };
+      const mainA = attackers.filter((a) => !sideSet.has(a));
+      const atkInfo = mainA.map((a) => ({ id: a.id, to: assign.get(a.id) || null }));
+      const sideInfo = side ? side.list.map((a) => ({ id: a.id, to: null })) : null;
+      if (mainA.length) announce(q, mainA, atkInfo);
+      if (side) { announce(side.q, side.list, sideInfo); p.attackedThisTurn.push(side.q.seat); }
       // Alibou: artifact creatures attacking
       if (attackers.some((a) => a.info.types.has('Artifact'))) for (const src of p.bf) if (src.info.triggers.some((t) => t.k === 'alibou')) {
         const x = p.bf.filter((c) => c.info.types.has('Artifact') && c.tapped).length;
@@ -4984,100 +5027,107 @@
         for (const src of [...p.bf]) for (const t of src.info.triggers) if (t.k === 'tribalAttack' && (a.info.subtypes || []).includes(t.sub)) this.resolveEffects(p, t.fx, src, null, false);
       }
       this.checkState();
-      if (q.lost || this.over) { attackers.forEach((a) => (a.attacking = false)); return; }
-      this.flashEmperor(q, attackers);
-      // blocks
-      const blocks = this.declareBlocks(q, attackers.filter((a) => a.zone === 'bf' && !assign.get(a.id)), p);
-      // creatures left over step in front of attackers sent at a planeswalker: a block that survives, or a chump when the walker would die
-      for (const a of attackers.filter((x) => x.zone === 'bf' && assign.get(x.id) && !this.hasKw(x, 'menace')).sort((x, y) => this.power(y) - this.power(x))) {
-        const w = this.cards[assign.get(a.id)], [ap, at] = this.pt(a), ak = this.kws(a), busy = new Set([...blocks.values()].flat());
-        const able = q.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b) && !busy.has(b) && this.canBlock(b, a));
-        const lives = (b) => (this.pt(b)[1] > ap || this.hasKw(b, 'indestructible')) && !ak.has('deathtouch'), kills = (b) => (this.pt(b)[0] >= at || this.hasKw(b, 'deathtouch')) && !ak.has('indestructible');
-        const b = able.find((x) => kills(x) && lives(x)) || able.find(lives) || (ap >= w.loyalty && !ak.has('trample') ? able.filter((x) => !x.isCommander && this.creatureValue(x) < this.permValue(w)).sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0] : null);
-        if (b) blocks.set(a.id, [b]);
-      }
-      const blkInfo = [...blocks.entries()].flatMap(([aid, bs]) => bs.map((b) => ({ id: b.id, blocks: aid })));
-      if (blkInfo.length) this.emit('block', `${q.name} blocks: ${[...blocks.entries()].map(([aid, bs]) => `${bs.map((b) => this.cname(b)).join(' + ')} blocks ${this.cards[aid].info.name}`).join('; ')}.`, { seat: q.seat, cards: blkInfo.map((b) => b.id), attackers: atkInfo, blockers: blkInfo, target: q.seat });
-      // Spore Frog style fogs when the hit would be big
-      const incoming = attackers.filter((a) => a.zone === 'bf' && !blocks.has(a.id)).reduce((s2, a) => s2 + this.power(a), 0);
-      const frog = q.bf.find((c) => c.info.fogSac);
-      // Teferi's Protection against a lethal attack (life or commander damage)
-      const lethal = incoming >= q.life || attackers.some((a) => a.zone === 'bf' && !blocks.has(a.id) && a.isCommander && (q.cmdDmg[a.id] || 0) + this.power(a) >= 21);
-      const tp = lethal && q.protectedUntil < this.turn && this.fogTurn !== this.turn && !this.abolished(q) && q.hand.find((c) => c.info.spell && c.info.spell.some((f) => f.k === 'protect' && !f.single) && /protection from everything/i.test(c.info.text || '') && this.pay(q, this.costFor(q, c, 'hand')));
-      if (tp && this.tryProtect(q, q.bf.slice(), p, true, tp)) { for (const a of attackers) a.attacking = false; this.emit('damage', `No combat damage is dealt to ${q.name}.`, { seat: p.seat, target: q.seat }); return; }
-      // a blocking Sakura-Tribe Elder that would die anyway is sacrificed for its value before damage
-      if (!this.abolished(q, 'ability')) for (const [aid, bs] of blocks) for (const b of bs) { const ab = this.selfSacAb(b); if (ab && b.zone === 'bf' && this.power(this.cards[aid]) >= this.toughness(b)) this.doActivate(q, { c: b, ab, fodder: [], cost: ab.cost }); }
-      if (frog && !this.abolished(q, 'ability') && (incoming >= q.life || incoming >= (this.has(q, 'muldrotha') ? 4 : 10))) { this.destroy(frog, 'sacrificed', true); this.fogTurn = this.turn; this.emit('response', `${q.name} sacrifices ${frog.info.name}: all combat damage this turn is prevented.`, { seat: q.seat, cards: [frog.id] }); }
-      // Osgir: sacrifice artifacts for +2/+0 on an unblocked attacker when it gets there
-      const osg = p.bf.find((c) => c.info.osgirPump);
-      if (osg) {
-        const unb = attackers.filter((a) => a.zone === 'bf' && !blocks.has(a.id) && !assign.get(a.id));
-        const fod = p.bf.filter((c) => c.info.types.has('Artifact') && !c.info.isCreature && ((c.token && !c.info.mv) || this.permValue(c) < 3));
-        const gap = q.life - unb.reduce((s2, a) => s2 + this.power(a), 0);
-        if (unb.length && gap > 0 && gap <= fod.length * 2 && this.availableMana(p) >= Math.ceil(gap / 2)) {
-          for (let i = 0; i < Math.ceil(gap / 2); i++) { if (!this.pay(p, parseCost('1'))) break; this.pay(p, parseCost('1'), 0, true); this.destroy(fod[i], 'sacrificed', true); unb[0].eot.p += 2; }
-          this.emit('ability', `${p.name} feeds artifacts to Osgir: ${unb[0].info.name} gets bigger.`, { seat: p.seat, cards: [osg.id, unb[0].id] });
+      if (this.over) { attackers.forEach((a) => (a.attacking = false)); return; }
+      // each defender blocks and takes damage from the creatures sent at them
+      const all = attackers;
+      const fight = (q, attackers, atkInfo) => {
+        if (q.lost || this.over || !attackers.length) return;
+        this.flashEmperor(q, attackers);
+        // blocks
+        const blocks = this.declareBlocks(q, attackers.filter((a) => a.zone === 'bf' && !assign.get(a.id)), p);
+        // creatures left over step in front of attackers sent at a planeswalker: a block that survives, or a chump when the walker would die
+        for (const a of attackers.filter((x) => x.zone === 'bf' && assign.get(x.id) && !this.hasKw(x, 'menace')).sort((x, y) => this.power(y) - this.power(x))) {
+          const w = this.cards[assign.get(a.id)], [ap, at] = this.pt(a), ak = this.kws(a), busy = new Set([...blocks.values()].flat());
+          const able = q.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b) && !busy.has(b) && this.canBlock(b, a));
+          const lives = (b) => (this.pt(b)[1] > ap || this.hasKw(b, 'indestructible')) && !ak.has('deathtouch'), kills = (b) => (this.pt(b)[0] >= at || this.hasKw(b, 'deathtouch')) && !ak.has('indestructible');
+          const b = able.find((x) => kills(x) && lives(x)) || able.find(lives) || (ap >= w.loyalty && !ak.has('trample') ? able.filter((x) => !x.isCommander && this.creatureValue(x) < this.permValue(w)).sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0] : null);
+          if (b) blocks.set(a.id, [b]);
         }
-      }
-      if (this.fogTurn === this.turn) { for (const a of attackers) a.attacking = false; this.emit('damage', `No combat damage is dealt.`, { seat: p.seat, target: q.seat }); return; }
-      // damage: first strike then regular
-      let dealtToPlayer = 0;
-      const lifelinkGain = [];
-      const step = (firstStrike) => {
-        for (const a of attackers) {
-          if (a.zone !== 'bf') continue;
-          const ak = this.kws(a);
-          const fs = ak.has('first strike') || ak.has('double strike');
-          if (firstStrike ? !fs : (fs && !ak.has('double strike'))) continue;
-          let dmg = this.power(a);
-          if (dmg <= 0 || (a.neutralized && a.neutralized >= this.turn)) continue;
-          const bs = (blocks.get(a.id) || []).filter((b) => b.zone === 'bf');
-          if (blocks.has(a.id) && (blocks.get(a.id) || []).length) {
-            for (const b of bs) {
-              const need = ak.has('deathtouch') ? 1 : Math.max(0, this.toughness(b) - b.dmg);
-              const d = Math.min(dmg, need || dmg);
-              const preventB = (b.neutralized && b.neutralized >= this.turn) || this.hasKw(b, 'emissary');
-              const dd = preventB ? 0 : this.scaleDamage(p.seat, q.seat, d);
-              if (!preventB) { const hit = this.permDmg(b, dd); if (ak.has('deathtouch')) hit.dt = true; }
-              dmg -= d;
-              if (ak.has('lifelink')) lifelinkGain.push(dd);
-              if (dmg <= 0) break;
+        const blkInfo = [...blocks.entries()].flatMap(([aid, bs]) => bs.map((b) => ({ id: b.id, blocks: aid })));
+        if (blkInfo.length) this.emit('block', `${q.name} blocks: ${[...blocks.entries()].map(([aid, bs]) => `${bs.map((b) => this.cname(b)).join(' + ')} blocks ${this.cards[aid].info.name}`).join('; ')}.`, { seat: q.seat, cards: blkInfo.map((b) => b.id), attackers: atkInfo, blockers: blkInfo, target: q.seat });
+        // Spore Frog style fogs when the hit would be big
+        const incoming = attackers.filter((a) => a.zone === 'bf' && !blocks.has(a.id)).reduce((s2, a) => s2 + this.power(a), 0);
+        const frog = q.bf.find((c) => c.info.fogSac);
+        // Teferi's Protection against a lethal attack (life or commander damage)
+        const lethal = incoming >= q.life || attackers.some((a) => a.zone === 'bf' && !blocks.has(a.id) && a.isCommander && (q.cmdDmg[a.id] || 0) + this.power(a) >= 21);
+        const tp = lethal && q.protectedUntil < this.turn && this.fogTurn !== this.turn && !this.abolished(q) && q.hand.find((c) => c.info.spell && c.info.spell.some((f) => f.k === 'protect' && !f.single) && /protection from everything/i.test(c.info.text || '') && this.pay(q, this.costFor(q, c, 'hand')));
+        if (tp && this.tryProtect(q, q.bf.slice(), p, true, tp)) { for (const a of attackers) a.attacking = false; this.emit('damage', `No combat damage is dealt to ${q.name}.`, { seat: p.seat, target: q.seat }); return; }
+        // a blocking Sakura-Tribe Elder that would die anyway is sacrificed for its value before damage
+        if (!this.abolished(q, 'ability')) for (const [aid, bs] of blocks) for (const b of bs) { const ab = this.selfSacAb(b); if (ab && b.zone === 'bf' && this.power(this.cards[aid]) >= this.toughness(b)) this.doActivate(q, { c: b, ab, fodder: [], cost: ab.cost }); }
+        if (frog && !this.abolished(q, 'ability') && (incoming >= q.life || incoming >= (this.has(q, 'muldrotha') ? 4 : 10))) { this.destroy(frog, 'sacrificed', true); this.fogTurn = this.turn; this.emit('response', `${q.name} sacrifices ${frog.info.name}: all combat damage this turn is prevented.`, { seat: q.seat, cards: [frog.id] }); }
+        // Osgir: sacrifice artifacts for +2/+0 on an unblocked attacker when it gets there
+        const osg = p.bf.find((c) => c.info.osgirPump);
+        if (osg) {
+          const unb = attackers.filter((a) => a.zone === 'bf' && !blocks.has(a.id) && !assign.get(a.id));
+          const fod = p.bf.filter((c) => c.info.types.has('Artifact') && !c.info.isCreature && ((c.token && !c.info.mv) || this.permValue(c) < 3));
+          const gap = q.life - unb.reduce((s2, a) => s2 + this.power(a), 0);
+          if (unb.length && gap > 0 && gap <= fod.length * 2 && this.availableMana(p) >= Math.ceil(gap / 2)) {
+            for (let i = 0; i < Math.ceil(gap / 2); i++) { if (!this.pay(p, parseCost('1'))) break; this.pay(p, parseCost('1'), 0, true); this.destroy(fod[i], 'sacrificed', true); unb[0].eot.p += 2; }
+            this.emit('ability', `${p.name} feeds artifacts to Osgir: ${unb[0].info.name} gets bigger.`, { seat: p.seat, cards: [osg.id, unb[0].id] });
+          }
+        }
+        if (this.fogTurn === this.turn) { for (const a of attackers) a.attacking = false; this.emit('damage', `No combat damage is dealt.`, { seat: p.seat, target: q.seat }); return; }
+        // damage: first strike then regular
+        let dealtToPlayer = 0;
+        const lifelinkGain = [];
+        const step = (firstStrike) => {
+          for (const a of attackers) {
+            if (a.zone !== 'bf') continue;
+            const ak = this.kws(a);
+            const fs = ak.has('first strike') || ak.has('double strike');
+            if (firstStrike ? !fs : (fs && !ak.has('double strike'))) continue;
+            let dmg = this.power(a);
+            if (dmg <= 0 || (a.neutralized && a.neutralized >= this.turn)) continue;
+            const bs = (blocks.get(a.id) || []).filter((b) => b.zone === 'bf');
+            if (blocks.has(a.id) && (blocks.get(a.id) || []).length) {
+              for (const b of bs) {
+                const need = ak.has('deathtouch') ? 1 : Math.max(0, this.toughness(b) - b.dmg);
+                const d = Math.min(dmg, need || dmg);
+                const preventB = (b.neutralized && b.neutralized >= this.turn) || this.hasKw(b, 'emissary');
+                const dd = preventB ? 0 : this.scaleDamage(p.seat, q.seat, d);
+                if (!preventB) { const hit = this.permDmg(b, dd); if (ak.has('deathtouch')) hit.dt = true; }
+                dmg -= d;
+                if (ak.has('lifelink')) lifelinkGain.push(dd);
+                if (dmg <= 0) break;
+              }
+              const tw = assign.get(a.id) && this.cards[assign.get(a.id)];
+              if (dmg > 0 && ak.has('trample') && tw && tw.zone === 'bf') { const dd = this.scaleDamage(p.seat, q.seat, dmg); tw.loyalty -= dd; if (ak.has('lifelink')) lifelinkGain.push(dd); } // trample over a blocker goes on to the planeswalker
+              else if (dmg > 0 && ak.has('trample')) this.hitPlayer(p, q, a, dmg, lifelinkGain, (n) => (dealtToPlayer += n));
+              else if (dmg > 0 && bs.length) { const dd = this.scaleDamage(p.seat, q.seat, dmg); this.permDmg(bs[0], dd); if (ak.has('lifelink')) lifelinkGain.push(dd); }
+            } else {
+              if (a.info.masterOfCruelties && a.enteredAttacking !== this.turn) { if (q.life > 1 && q.protectedUntil < this.turn) { this.loseLife(q, q.life - 1, a); this.emit('combo', `Master of Cruelties goes unblocked: ${q.name}'s life total becomes 1!`, { seat: p.seat, cards: [a.id], target: q.seat }); } continue; }
+              const wid = assign.get(a.id);
+              const w = wid && this.cards[wid];
+              if (w && w.zone === 'bf') { const dd = this.scaleDamage(p.seat, q.seat, dmg); this.permDmg(w, dd); if (ak.has('lifelink')) lifelinkGain.push(dd); if (w.vraskaShield != null) { this.destroy(a); this.emit('removal', `Vraska destroys ${a.info.name}.`, { seat: q.seat, cards: [a.id] }); } }
+              else this.hitPlayer(p, q, a, dmg, lifelinkGain, (n) => (dealtToPlayer += n));
             }
-            const tw = assign.get(a.id) && this.cards[assign.get(a.id)];
-            if (dmg > 0 && ak.has('trample') && tw && tw.zone === 'bf') { const dd = this.scaleDamage(p.seat, q.seat, dmg); tw.loyalty -= dd; if (ak.has('lifelink')) lifelinkGain.push(dd); } // trample over a blocker goes on to the planeswalker
-            else if (dmg > 0 && ak.has('trample')) this.hitPlayer(p, q, a, dmg, lifelinkGain, (n) => (dealtToPlayer += n));
-            else if (dmg > 0 && bs.length) { const dd = this.scaleDamage(p.seat, q.seat, dmg); this.permDmg(bs[0], dd); if (ak.has('lifelink')) lifelinkGain.push(dd); }
-          } else {
-            if (a.info.masterOfCruelties && a.enteredAttacking !== this.turn) { if (q.life > 1 && q.protectedUntil < this.turn) { this.loseLife(q, q.life - 1, a); this.emit('combo', `Master of Cruelties goes unblocked: ${q.name}'s life total becomes 1!`, { seat: p.seat, cards: [a.id], target: q.seat }); } continue; }
-            const wid = assign.get(a.id);
-            const w = wid && this.cards[wid];
-            if (w && w.zone === 'bf') { const dd = this.scaleDamage(p.seat, q.seat, dmg); this.permDmg(w, dd); if (ak.has('lifelink')) lifelinkGain.push(dd); if (w.vraskaShield != null) { this.destroy(a); this.emit('removal', `Vraska destroys ${a.info.name}.`, { seat: q.seat, cards: [a.id] }); } }
-            else this.hitPlayer(p, q, a, dmg, lifelinkGain, (n) => (dealtToPlayer += n));
           }
-        }
-        // blockers strike back
-        for (const [aid, bs] of blocks) {
-          const a = this.cards[aid];
-          for (const b of bs) {
-            if (b.zone !== 'bf' || a.zone !== 'bf') continue;
-            const bk = this.kws(b);
-            const fs = bk.has('first strike') || bk.has('double strike');
-            if (firstStrike ? !fs : (fs && !bk.has('double strike'))) continue;
-            let d = this.scaleDamage(q.seat, p.seat, this.power(b));
-            if ((b.neutralized && b.neutralized >= this.turn) || (a.neutralized && a.neutralized >= this.turn) || this.hasKw(a, 'emissary')) d = 0;
-            if (a.info.types.has('Artifact') && this.has(p, 'losheel')) d = 0;
-            if (d > 0) { const hit = this.permDmg(a, d); if (bk.has('deathtouch')) hit.dt = true; if (bk.has('lifelink')) this.gainLife(q, d); }
+          // blockers strike back
+          for (const [aid, bs] of blocks) {
+            const a = this.cards[aid];
+            for (const b of bs) {
+              if (b.zone !== 'bf' || a.zone !== 'bf') continue;
+              const bk = this.kws(b);
+              const fs = bk.has('first strike') || bk.has('double strike');
+              if (firstStrike ? !fs : (fs && !bk.has('double strike'))) continue;
+              let d = this.scaleDamage(q.seat, p.seat, this.power(b));
+              if ((b.neutralized && b.neutralized >= this.turn) || (a.neutralized && a.neutralized >= this.turn) || this.hasKw(a, 'emissary')) d = 0;
+              if (a.info.types.has('Artifact') && this.has(p, 'losheel')) d = 0;
+              if (d > 0) { const hit = this.permDmg(a, d); if (bk.has('deathtouch')) hit.dt = true; if (bk.has('lifelink')) this.gainLife(q, d); }
+            }
           }
-        }
-        if (lifelinkGain.length) { for (const n of lifelinkGain) if (n > 0) this.gainLife(p, n); lifelinkGain.length = 0; }
-        this.checkState();
+          if (lifelinkGain.length) { for (const n of lifelinkGain) if (n > 0) this.gainLife(p, n); lifelinkGain.length = 0; }
+          this.checkState();
+        };
+        const anyFS = attackers.concat(...blocks.values()).some((c) => this.hasKw(c, 'first strike') || this.hasKw(c, 'double strike'));
+        if (anyFS) step(true);
+        step(false);
+        const lostTxt = q.lost ? '' : ` ${q.name} is at ${q.life}.`;
+        this.emit('damage', `Combat damage: ${dealtToPlayer} to ${q.name}.${lostTxt}`, { seat: p.seat, attackers: atkInfo.filter((x) => this.cards[x.id].zone === 'bf'), blockers: blkInfo.filter((x) => this.cards[x.id].zone === 'bf'), target: q.seat });
       };
-      const anyFS = attackers.concat(...blocks.values()).some((c) => this.hasKw(c, 'first strike') || this.hasKw(c, 'double strike'));
-      if (anyFS) step(true);
-      step(false);
-      const lostTxt = q.lost ? '' : ` ${q.name} is at ${q.life}.`;
-      this.emit('damage', `Combat damage: ${dealtToPlayer} to ${q.name}.${lostTxt}`, { seat: p.seat, attackers: atkInfo.filter((x) => this.cards[x.id].zone === 'bf'), blockers: blkInfo.filter((x) => this.cards[x.id].zone === 'bf'), target: q.seat });
-      for (const a of attackers) a.attacking = false;
+      fight(q, all.filter((a) => !sideSet.has(a)), atkInfo);
+      if (side) fight(side.q, side.list.filter((a) => a.zone === 'bf'), sideInfo);
+      for (const a of all) a.attacking = false;
       // additional combat phases, one per trigger that granted one (capped so a loop can't run forever)
       const queued = this._extraCombats || []; this._extraCombats = [];
       if (p.extraCombatsTurn !== this.turn) { p.extraCombatsTurn = this.turn; p.extraCombats = 0; }
