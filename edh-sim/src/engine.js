@@ -3423,8 +3423,13 @@
           const pred = f.what === 'creature' ? (x) => x.info.isCreature : (x) => !x.info.isLand;
           const t = this.bestOppTarget(p, (x) => pred(x) && tgtOk(x));
           if (!t && i.isInstant || !t && i.isSorcery) return -1;
-          if (t) s += Math.min(25, this.permValue(t) * 1.6);
+          // a bounce only costs the owner the mana to cast it again, unless it can't come back (a token, or a permanent
+          // that returns to its owner instead of the player using it); a card spent on that is a card down
+          const sticks = t && (!f.bounce || t.token || t.owner !== t.ctrl);
+          if (t) s += sticks ? Math.min(25, this.permValue(t) * 1.6) : Math.min(14, (t.info.mv || 0) * 1.2) - 6;
           if (t && this.permValue(t) < 6 && !i.isPermanent) s -= 15;
+          // a stronger mode (overload) that is out of reach for now: keep the card for it unless the target is a real threat
+          if (t && i.overload && !this.pay(p, i.overload) && this.permValue(t) < 15) s -= 25;
         }
         if (f.k === 'exchange') { const t = this.bestOppTarget(p, (x) => x.info.isCreature && tgtOk(x) && (!f.pmax || this.power(x) <= f.pmax)); if (!t) return -1; s += this.creatureValue(t) * 1.5; }
         if (f.k === 'edict') { if (!opp.some((q) => q.bf.some((x) => x.info.isCreature))) return -1; s += 8; }

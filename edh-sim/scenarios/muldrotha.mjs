@@ -112,6 +112,15 @@ export default [
     },
   },
   {
+    card: 'Cyclonic Rift', title: 'is not spent on turn 3 to bounce a 1-mana Giver of Runes; it waits for overload',
+    wrong: 'a bounce was scored like destroying the target, so Rift went on a creature its owner recast next turn for one mana',
+    run({ table, card, put }) {
+      const [g, me, opp] = setup(table); lands(g, me, 3); g.round = 3; const r = card(g, me, 'Cyclonic Rift', 'hand'); put(g, opp, 'Giver of Runes');
+      g.mainPhase(me);
+      return { ok: r.zone === 'hand', note: `Rift is in: ${r.zone}` };
+    },
+  },
+  {
     card: 'Hermit Druid', title: 'does not attack into a blocker that would kill it (seed 96395496)',
     wrong: 'a 1/1 combo piece swung for 1 into an untapped Zulaport Cutthroat and traded; only creatures worth 6+ avoided trades',
     run({ table, put }) {
