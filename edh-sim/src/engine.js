@@ -2242,11 +2242,10 @@
           const tgt = src && src._target ? src._target : this.bestOppTarget(p, (c) => pred(c) && this.targetable(c, p) && !(destroys && (this.hasKw(c, 'indestructible') || c.indestructibleEOT)));
           if (!tgt || tgt.zone !== 'bf') break;
           const owner = this.P(tgt.ctrl);
+          this.announceTarget(p, tgt, src, name);
           if (this.tryProtect(owner, [tgt], p)) break;
           let verb;
-          if (owner !== p && tgt.info.wardLife) { if (!this.canPayLife(p, tgt.info.wardLife)) break; this.loseLife(p, tgt.info.wardLife); }
-          if (owner !== p && tgt.info.wardSac) { const f = p.bf.filter((x) => !x.info.isLand && x !== src).sort((a, b) => this.permValue(a) - this.permValue(b)).slice(0, 3); if (f.length < 3) { this.emit('effect', `Ward: ${p.name} can't pay, so the spell is countered.`, { seat: p.seat }); break; } for (const x of f) this.destroy(x, 'sacrificed', true); }
-          if (owner !== p && tgt.info.wardMana) { if (!this.pay(p, parseCost(String(tgt.info.wardMana)))) { this.emit('effect', `Ward counters the spell.`, { seat: p.seat }); break; } this.pay(p, parseCost(String(tgt.info.wardMana)), 0, true); }
+          if (!this.payWard(p, tgt, src)) break;
           if (this.redirectRemoval(owner, p, tgt, src)) break;
           if (this.runesSave(owner, tgt)) break;
           // announce first, then do it, so what it sets off (dies triggers, commander moving home) is logged after
@@ -2282,6 +2281,8 @@
         case 'steal': {
           const tgt = this.bestOppTarget(p, (c) => (fx.what === 'creature' ? c.info.isCreature : !c.info.isLand) && this.targetable(c, p));
           if (!tgt) break;
+          this.announceTarget(p, tgt, src, name);
+          if (!this.payWard(p, tgt, src)) break;
           const from = this.P(tgt.ctrl); this.removeFrom(from.bf, tgt); tgt.ctrl = p.seat; tgt.sick = true; p.bf.push(tgt);
           this.emit('removal', `${p.name} steals ${tgt.info.name} from ${from.name}.`, { seat: p.seat, cards: [tgt.id], target: from.seat });
           break;
@@ -3135,10 +3136,34 @@
       let best = null, bestV = 2;
       for (const q of this.opps(p)) {
         const lead = this.politics ? this.relThreat(p, q) * 0.1 * (this.politics / 40) : this.playerThreat(q) * 0.05; // removal leans toward the leader's permanents
-        for (const c of q.bf) if (pred(c)) { const v = this.permValue(c) + lead; if (v > bestV) { best = c; bestV = v; } }
+        for (const c of q.bf) if (pred(c)) { const v = this.permValue(c) + lead - this.wardCost(p, c); if (v > bestV) { best = c; bestV = v; } }
       }
       return best;
     }
+    // What targeting c costs us on top of the spell: its ward. Infinity when we can't (or shouldn't) pay it.
+    wardCost(p, c, src = null) {
+      if (c.ctrl === p.seat) return 0;
+      const i = c.info; let v = 0;
+      if (i.wardLife) { if (!this.canPayLife(p, i.wardLife)) return Infinity; v += i.wardLife * 0.5; }
+      if (i.wardSac) { const f = this.wardSacFodder(p, src); if (f.length < 3) return Infinity; v += f.reduce((a, x) => a + this.permValue(x), 0); }
+      if (i.wardMana) { if (this.availableMana(p) < i.wardMana) return Infinity; v += i.wardMana * 0.5; }
+      return v;
+    }
+    // "Cyclonic Rift targets Kaalia's Valgavoth": said before ward, protection and redirects, so the log reads in order
+    announceTarget(p, tgt, src, name) {
+      const owner = this.P(tgt.ctrl), what = src ? src.info.name : name || p.name;
+      this.emit('effect', `${what} targets ${owner === p ? 'their own' : owner.name + "'s"} ${this.cname(tgt)}.`, { seat: p.seat, cards: (src ? [src.id] : []).concat(tgt.id), target: owner.seat });
+    }
+    // Pay the target's ward; false when it can't be paid and the spell or ability is countered
+    payWard(p, tgt, src) {
+      if (tgt.ctrl === p.seat) return true;
+      const i = tgt.info;
+      if (i.wardLife) { if (!this.canPayLife(p, i.wardLife)) { this.emit('effect', `Ward: ${p.name} won't pay ${i.wardLife} life, so it is countered.`, { seat: p.seat, cards: [tgt.id] }); return false; } this.emit('effect', `${p.name} pays ${i.wardLife} life for ${i.name}'s ward.`, { seat: p.seat, cards: [tgt.id] }); this.loseLife(p, i.wardLife); }
+      if (i.wardSac) { const f = this.wardSacFodder(p, src); if (f.length < 3) { this.emit('effect', `Ward: ${p.name} can't pay, so the spell is countered.`, { seat: p.seat }); return false; } this.emit('effect', `${p.name} sacrifices ${this.listNames(f.map((x) => x.info.name))} to pay ${i.name}'s ward.`, { seat: p.seat, cards: f.map((x) => x.id).concat(tgt.id) }); for (const x of f) this.destroy(x, 'sacrificed', true); }
+      if (i.wardMana) { if (!this.pay(p, parseCost(String(i.wardMana)))) { this.emit('effect', `Ward counters the spell.`, { seat: p.seat }); return false; } this.emit('effect', `${p.name} pays {${i.wardMana}} for ${i.name}'s ward.`, { seat: p.seat, cards: [tgt.id] }); this.pay(p, parseCost(String(i.wardMana)), 0, true); }
+      return !p.lost && !this.over;
+    }
+    wardSacFodder(p, src) { return p.bf.filter((x) => !x.info.isLand && x !== src).sort((a, b) => this.permValue(a) - this.permValue(b)).slice(0, 3); }
     landValue(p, c) {
       const m = c.info.mana; if (!m) return c.info.fetch ? 2 : 0;
       const cols = new Set(m.opts.flatMap((o) => o.colors));
@@ -3883,17 +3908,15 @@
       this.phase = 'main';
       for (const c of [...p.bf]) if (c.info.bmc) this.blackMarket(p, c);
       this.checkState(); if (p.lost || this.over) return;
-      this.mainPhase(p);
-      if (p.lost || this.over) return;
-      // combat
-      this.emptyPools();
-      this.phase = 'combat';
-      this.combat(p);
-      if (p.lost || this.over) return;
-      this.emptyPools();
-      this.phase = 'main 2';
-      this.mainPhase(p, true);
-      if (p.lost || this.over) return;
+      this.restOfTurn(p, 'main');
+    }
+    // The turn from a given phase on (main, combat, main 2, end). The mistake-finder's judge picks up a copied game
+    // mid-turn with it, so a copy finishes the turn exactly the way a real turn goes.
+    restOfTurn(p, from = 'main') {
+      const order = ['main', 'combat', 'main 2', 'end'], at = (ph) => order.indexOf(ph) >= order.indexOf(from);
+      if (at('main')) { this.phase = 'main'; this.mainPhase(p); if (p.lost || this.over) return; }
+      if (at('combat')) { this.emptyPools(); this.phase = 'combat'; this.combat(p); if (p.lost || this.over) return; }
+      if (at('main 2')) { this.emptyPools(); this.phase = 'main 2'; this.mainPhase(p, true); if (p.lost || this.over) return; }
       // end step
       this.emptyPools();
       this.phase = 'end';
@@ -4005,7 +4028,7 @@
         o = {}; seen.set(v, o); for (const k of Object.keys(v)) o[k] = cp(v[k], k); return o;
       };
       const g = Object.create(Object.getPrototypeOf(this));
-      for (const k of Object.keys(this)) if (k !== 'emit') g[k] = skip.has(k) ? this[k] : cp(this[k], k); // (an emit wrapped around the real game, by a monitor or the UI, must not see the copy's moves)
+      for (const k of Object.keys(this)) if (typeof this[k] !== 'function') g[k] = skip.has(k) ? this[k] : cp(this[k], k); // (a method wrapped around the real game, by a monitor, the UI or the mistake-finder, must not see the copy's moves)
       this._lookN = (this._lookN || 0) + 1;
       g.R = rng((this.seed * 7919 + this._lookN * 104729) >>> 0); g.events = []; g.stats = {}; g._crBuf = []; g.samples = []; g.mullSamples = []; g.record = false; g.collect = false; g.explore = 0; g._inLook = true;
       for (const q of g.players) g.R.shuffle(q.library);

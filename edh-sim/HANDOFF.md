@@ -38,7 +38,12 @@ a heuristic AI steered by a small neural network, and a single-page web app publ
   "do nothing" (`lookPick`); in combat it tries the attack without each attacker that could die, and no attack.
   With it, Hermit Druid stays home and Yawgmoth + Dictate of Erebos runs with no rule for either (checked by switching
   those rules off). Rules are a shortlist; the look-ahead decides.
-- Next: an automatic mistake-finder (where the AI's pick and the look-ahead's best differ most, with seed and turn), then
+- Mistake-finder: `node mistakes.mjs 400 --cores 8` (about 9 minutes) plays games while a judge re-checks a sample of
+  decisions (every option, played to the player's next turn, 3 playouts with shared draws, flags re-checked with 8 more)
+  and writes grouped patterns to data/mistakes.json. First run (400 games): combat is the weakest area (no attack when
+  all-in won, holding creatures back, attacking when staying home was better), then casting before combat when after
+  was better.
+- Next: fix the top patterns generically (attack look-ahead that can add attackers / go all-in; main 1 vs main 2), then
   the network as the board scorer, with training spread across cores.
 - A/B harness pattern: `looseSeats: [seat]` gives one seat the new candidates; 25% is an even share.
 
