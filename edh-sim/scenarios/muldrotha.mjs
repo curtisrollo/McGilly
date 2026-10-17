@@ -112,6 +112,36 @@ export default [
     },
   },
   {
+    card: 'Sakura-Tribe Elder', title: 'ramp line: Elder turn 2, Cultivate turn 3, Muldrotha on turn 4',
+    wrong: '(new) the opening that gets Muldrotha out two turns early',
+    run({ table, card, put }) {
+      const g = table(11, 4); const [me, ...opps] = g.players;
+      me.bf = []; put(g, me, 'Forest'); me.hand = [];
+      for (const n of ['Sakura-Tribe Elder', 'Cultivate', 'Island', 'Swamp', 'Forest']) card(g, me, n, 'hand');
+      for (const q of opps) { q.hand = []; q.bf = q.bf.filter((c) => c.info.isLand); q.library = q.library.filter((c) => c.info.isLand); }
+      const log = [];
+      const em = g.emit.bind(g); g.emit = (k, t, x) => { if (x && x.seat === me.seat) log.push(t); return em(k, t, x); };
+      let castOn = null;
+      for (let t = 2; t <= 4 && !castOn; t++) {
+        g.active = me.seat; g.round = t; g.takeTurn(me, false);
+        if (me.bf.some((c) => c.isCommander)) castOn = t;
+        for (const q of opps) { g.active = q.seat; g.takeTurn(q, false); }
+      }
+      return { ok: castOn === 4, note: `Muldrotha cast on turn ${castOn || 'none by 4'}: ${log.filter((x) => /casts|sacrifices|plays/.test(x)).join(' | ')}` };
+    },
+  },
+  {
+    card: 'Sakura-Tribe Elder', title: 'is sacrificed for its land at the end of the turn before ours (seed 537248066)',
+    wrong: 'it sat on the battlefield; it was only sacrificed when blocking or in a Muldrotha loop',
+    run({ table, put }) {
+      const [g, me, opp] = setup(table); const e = put(g, me, 'Sakura-Tribe Elder'); const l0 = me.bf.filter((c) => c.info.isLand).length;
+      g.players[3].lost = true; g.players[2].lost = true; // the opponent's turn is the one right before ours
+      g.active = opp.seat; g.takeTurn(opp, false);
+      const l1 = me.bf.filter((c) => c.info.isLand).length;
+      return { ok: e.zone !== 'bf' && l1 === l0 + 1, note: `Elder in ${e.zone}; lands ${l0} -> ${l1}` };
+    },
+  },
+  {
     card: 'Phantasmal Image', title: 'copies the best permanent it can keep, not our own Muldrotha (legend rule) (seed 88168351)',
     wrong: 'it copied the most valuable permanent on the table, our own legendary commander, and one of the two died at once',
     run({ table, card, put }) {

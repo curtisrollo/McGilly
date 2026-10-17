@@ -3991,6 +3991,7 @@
       }
       for (const e of p.emblems || []) if (e === 'kraken') this.addToken(p, { p: 9, t: 9, sub: 'Kraken', colors: 'blue' }, 1, false);
       this.endStepDelayed(p);
+      this.eotSelfSacs(p);
       // Teferi, Master of Time: its controller also uses it on other players' turns (here, at instant speed in their end step)
       for (const q of this.opps(p)) for (const c of [...q.bf]) if (c.info.anyTurnPW && c.zone === 'bf' && c.usedTurn !== this.turn && this.walkerOnce(q, c)) { c.usedTurn = this.turn; c.usedCount = 1; }
       for (const c of [...p.bf]) {
@@ -4244,6 +4245,22 @@
     }
 
     // Sakura-Tribe Elder style: sacrifice itself for free for something (blocks, then goes away before damage)
+    // At the end of the turn before ours, at the latest: cash in creatures whose own sacrifice is a one-shot gain
+    // (Sakura-Tribe Elder's land untaps on our turn, so it ramps just as early, and Muldrotha can cast it again).
+    // Until then it can still block and be sacrificed mid-combat (see combat), but it is never held back for that.
+    eotSelfSacs(active) {
+      let n = active.seat; do { n = (n + 1) % this.players.length; } while (this.P(n).lost && n !== active.seat);
+      const q = this.P(n);
+      if (q === active || q.lost || this.over || this.abolished(q, 'ability') || this.locked(q)) return;
+      for (const c of q.bf.slice()) {
+        const ab = this.selfSacAb(c);
+        if (!ab || c.zone !== 'bf' || c.isCommander) continue;
+        if (ab.fx.some((f) => f.k === 'draw') && q.library.length < 10) continue;
+        this.emit('ability', `At the end of ${active.name}'s turn, ${q.name} sacrifices ${c.info.name}.`, { seat: q.seat, cards: [c.id] });
+        this.doActivate(q, { c, ab, fodder: [], cost: ab.cost });
+        if (this.over) return;
+      }
+    }
     selfSacAb(c) { return c.info.isCreature && c.info.activated.find((ab) => ab.sac && !ab.tap && !ab.cost.mv && !ab.life && ab.fx.some((f) => f.k === 'ramp' || f.k === 'draw')); }
 
     animateManlands(p) {
@@ -4477,6 +4494,7 @@
           s += best && val(best) > 0 ? 8 + val(best) * 2 : -20;
         }
         else if (f.k === 'draw') s += 5 + this.fxNum(p, f.n, 1) * 3;
+        else if (f.k === 'ramp') s += this.selfSacAb(c) === ab ? 3 : Math.max(4, 26 - this.round * 2) * Math.max(1, (f.bf || 0) + (f.hand || 0) * 0.5); // ramp early, like ramp spells (a free self-sacrifice like Sakura-Tribe Elder waits for the end of the turn before ours: same land, and it can still block)
         else if (f.k === 'search' && f.dest !== 'gy') {
           const cap2 = f.mvPlusOne ? Math.max(0, ...fodder.map((x) => x.info.mv)) + 1 : typeof f.mvMax === 'number' ? f.mvMax : null;
           const ok = (x) => (/artifact/.test(f.what || '') ? x.info.types.has('Artifact') : /creature/.test(f.what || '') ? x.info.isCreature : !x.info.isLand) && (cap2 == null || (f.mvPlusOne ? x.info.mv === cap2 : x.info.mv <= cap2));
