@@ -962,6 +962,8 @@
     // and predicts the chance that player goes on to win. V = chance from here; Q = chance after
     // playing that card. Q - V (the advantage) is how much the card helps right now.
     static loadNN(j) {
+      // a network trained on a different set of board features can't read this engine's: treat it as off until retrained
+      if (!j || !j.q || j.q.nDense !== Game.NN_STATE + Game.NN_CARD + 1 + (j.decks || []).length) return null;
       const { MLP } = typeof module !== 'undefined' && module.exports ? require('./nn.js') : root.PodNN;
       return { q: MLP.fromJSON(j.q), m: j.m ? MLP.fromJSON(j.m) : null, vocab: new Map(j.vocab.map((n, i) => [n, i])), decks: j.decks, base: j.base || {}, gen: j.generation };
     }
@@ -986,6 +988,34 @@
         mine / 50, oppMax / 50, (mine - oppMax) / 50, p.bf.some((c) => c.isCommander) ? 1 : 0, p.tax / 3, p.gy.length / 30,
         this.availableMana(p) / 12, Math.max(0, ...opps.map((q) => q.poison)) / 10, p.bf.filter((c) => !c.info.isLand && !c.info.isCreature).length / 10,
         p.library.length / 100, Math.max(0, ...Object.values(p.cmdDmg)) / 21, this.active === p.seat ? 1 : 0, 1,
+        ...this._nnRich(p, opps, crs),
+      ];
+    }
+    // What decides games, beyond the totals above: evasion both ways, lethal through blockers, danger, combo progress
+    // both ways, lock pieces both ways, commander damage dealt, tokens, engines, graveyard creatures, status flags.
+    _nnRich(p, opps, crs) {
+      const untapped = (q) => q.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b));
+      const free = (from, q) => crs(from).filter((a) => this.power(a) > 0 && !untapped(q).some((b) => this.canBlock(b, a))).reduce((s2, a) => s2 + this.power(a), 0);
+      const through = (q) => { // what p's creatures would deal q if q blocked the biggest ones it can
+        const bl = untapped(q), used = new Set(); let d = 0;
+        for (const a of crs(p).filter((x) => this.power(x) > 0).sort((x, y) => this.power(y) - this.power(x))) { const b = bl.find((x) => !used.has(x) && this.canBlock(x, a)); if (b) used.add(b); else d += this.power(a); }
+        return d;
+      };
+      const comboClose = (q) => Math.max(0, ...this.comboWants(q).map((w) => 1 - w.missing.length / 3));
+      const myCmd = p.bf.concat(p.command).filter((c) => c.isCommander).map((c) => c.id);
+      const cmdDealt = Math.max(0, ...opps.flatMap((q) => myCmd.map((id) => q.cmdDmg[id] || 0)));
+      const lockOn = (who, from) => Math.max(0, ...from.flatMap((q) => q.bf).map((x) => this.lockValue(who, x)));
+      return [
+        Math.max(0, ...opps.map((q) => free(p, q))) / 30, Math.max(0, ...opps.map((q) => free(q, p))) / 30,
+        Math.min(1.5, Math.max(0, ...opps.map((q) => through(q) / Math.max(1, q.life)))) / 1.5,
+        Math.min(1.5, (this.lifeFloor(p) - 4) / Math.max(1, p.life)) / 1.5,
+        comboClose(p), Math.max(0, ...opps.map(comboClose)),
+        Math.min(60, lockOn(p, opps)) / 60, Math.min(60, Math.max(0, ...opps.map((q) => lockOn(q, [p])))) / 60,
+        cmdDealt / 21, p.bf.filter((c) => c.token).length / 20,
+        p.bf.filter((c) => !c.info.isLand && (c.info.triggers.length || c.info.statics.length || c.info.deathWatch.length)).length / 10,
+        p.gy.filter((c) => c.info.isCreature).length / 10,
+        p.protectedUntil >= this.turn ? 1 : 0, this.has(p, 'platinum') ? 1 : 0, p.infMana === this.turn ? 1 : 0,
+        Math.max(0, ...opps.map((q) => q.hand.length)) / 10,
       ];
     }
     nnCard(p, c, from) {
@@ -5427,7 +5457,7 @@
 
   Game.STEP_LIMIT = 200000; // mana payments per game; real games use under 3,000
   Game.NN_CARD = 30;      // card features (see nnCard)
-  Game.NN_STATE = 24;     // board features (see nnState)
+  Game.NN_STATE = 40;     // board features (see nnState and _nnRich)
   Game.NN_WEIGHT = 150;   // how much a 0.1 swing in win chance is worth when scoring a play
 
   function simulate(decks, db, seed, opts) {
