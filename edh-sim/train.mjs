@@ -6,8 +6,12 @@
 // A second, smaller network learns which opening hands win, for mulligans. The next generation plays
 // with what the last one learned (plus a little randomness so it keeps seeing new lines).
 // At the end, an A/B test plays games where one seat uses the network and the others don't.
-// Usage: node train.mjs [--gens 4] [--games 500] [--ab 400] [--fresh]
+// Games are played on worker processes, one per core (--cores, default all but one); the main process picks every
+// game's pod and seed exactly as a single process would, and trains on the results in order.
+// Usage: node train.mjs [--gens 4] [--games 500] [--ab 400] [--fresh] [--cores 9]
 import fs from 'node:fs';
+import os from 'node:os';
+import { fork } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { parseDeck } from './fetch-cards.mjs';
 const require = createRequire(import.meta.url);
@@ -16,6 +20,7 @@ const { MLP } = require('./src/nn.js');
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i >= 0 ? +process.argv[i + 1] : d; };
 const GENS = arg('gens', 4), N = arg('games', 500), AB = arg('ab', 400), fresh = process.argv.includes('--fresh');
+const CORES = Math.max(1, arg('cores', os.cpus().length - 1));
 const OUT = 'data/nn.json';
 const db = JSON.parse(fs.readFileSync('data/cards.json', 'utf8'));
 const ids = fs.readdirSync('decks').filter((f) => f.endsWith('.txt')).map((f) => f.replace('.txt', '')).sort();
@@ -25,6 +30,54 @@ const vIdx = new Map(vocab.map((n, i) => [n, i]));
 const nDense = Game.NN_STATE + Game.NN_CARD + 1 + ids.length;
 const nHand = 11 + ids.length;
 
+const deckOneHot = (id) => ids.map((x) => (x === id ? 1 : 0));
+function toQ(s, y) {
+  const d = s.st.concat(s.card, [0], deckOneHot(s.deck));
+  const v = s.st.concat(new Array(Game.NN_CARD).fill(0), [1], deckOneHot(s.deck));
+  const k = vIdx.get(s.name);
+  return [{ d, s: k != null ? [k] : [], y }, { d: v, s: [], y, w: 0.5 }];
+}
+// one game, as a worker plays it: { pod: [deck ids], seed, explore, nnSeats, collect }
+function playOne(spec, nn) {
+  const pod = spec.pod.map((id) => decks.find((d) => d.id === id));
+  const game = new Game(pod, db, spec.seed, { record: false, collect: !!spec.collect, nn, explore: spec.explore || 0, nnSeats: spec.nnSeats }).run();
+  const r = { winner: game.winner, runaway: !!game.runaway };
+  if (spec.collect) {
+    const y = (seat) => (game.winner === seat ? 1 : game.winner == null ? 0.25 : 0);
+    r.out = game.samples.flatMap((x) => toQ(x, y(x.seat)));
+    r.hands = game.mullSamples.map((h) => ({ d: h.d.slice(0, 11).concat(deckOneHot(h.deck)), s: h.names.map((nm) => vIdx.get(nm)).filter((k) => k != null), y: y(h.seat) }));
+  }
+  return r;
+}
+if (process.env.TRAIN_WORKER) {
+  let nnKey = null, nnObj = null;
+  process.on('message', (job) => {
+    if (job.nnKey !== nnKey) { nnKey = job.nnKey; nnObj = job.nn ? Game.loadNN(job.nn) : null; }
+    if (job.nn === undefined && job.nnKey == null) nnObj = null;
+    process.send({ id: job.id, res: job.specs.map((sp) => playOne(sp, nnObj)) });
+  });
+}
+// the worker pool: games go out in small chunks to whichever worker is free; results come back in order
+let workers = null;
+function runGames(specs, nn, nnKey, label) {
+  if (!workers) workers = Array.from({ length: CORES }, () => fork(new URL(import.meta.url).pathname, process.argv.slice(2), { env: { ...process.env, TRAIN_WORKER: '1' }, serialization: 'advanced' }));
+  const res = new Array(specs.length), CH = 10;
+  let next = 0, done = 0, shown = 0;
+  return new Promise((resolve) => {
+    const give = (w) => {
+      if (next >= specs.length) return;
+      const id = next; next += CH;
+      w.once('message', (m) => {
+        m.res.forEach((r, i) => (res[m.id + i] = r)); done += m.res.length;
+        while (label && done - shown >= 100) { shown += 100; process.stdout.write(`    ${shown}/${specs.length} ${label}\n`); }
+        if (done >= specs.length) resolve(res); else give(w);
+      });
+      w.send({ id, specs: specs.slice(id, id + CH), nn, nnKey });
+    };
+    for (const w of workers) give(w);
+  });
+}
+async function main() {
 let prev = !fresh && fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : null;
 if (prev && (prev.vocab.length !== vocab.length || prev.q.nDense !== nDense)) { console.log('Card pool or features changed: starting fresh.'); prev = null; }
 let q = prev ? MLP.fromJSON(prev.q) : new MLP(nDense, vocab.length, [48, 24], 7);
@@ -34,25 +87,17 @@ let gen = prev ? prev.generation : 0;
 const buffer = []; // last few generations of samples
 const R = rng(1234 + gen);
 
-const deckOneHot = (id) => ids.map((x) => (x === id ? 1 : 0));
-function toQ(s, y) {
-  const d = s.st.concat(s.card, [0], deckOneHot(s.deck));
-  const v = s.st.concat(new Array(Game.NN_CARD).fill(0), [1], deckOneHot(s.deck));
-  const k = vIdx.get(s.name);
-  return [{ d, s: k != null ? [k] : [], y }, { d: v, s: [], y, w: 0.5 }];
-}
-function play(n, seed0, nn, explore) {
+async function play(n, seed0, nn, explore) {
   const out = [], hands = [], wins = Object.fromEntries(ids.map((id) => [id, [0, 0]]));
-  for (let g = 0; g < n; g++) {
-    const pod = R.shuffle(decks.slice()).slice(0, 4);
-    const game = new Game(pod, db, seed0 + g, { record: false, collect: true, nn, explore }).run();
-    if (game.runaway) console.log(`    game ${seed0 + g} got stuck in a loop and was called a draw (${pod.map((d) => d.id).join(', ')})`);
-    const y = (seat) => (game.winner === seat ? 1 : game.winner == null ? 0.25 : 0);
-    for (const s of game.samples) out.push(...toQ(s, y(s.seat)));
-    for (const h of game.mullSamples) hands.push({ d: h.d.slice(0, 11).concat(deckOneHot(h.deck)), s: h.names.map((nm) => vIdx.get(nm)).filter((k) => k != null), y: y(h.seat) });
-    pod.forEach((d, seat) => { wins[d.id][1]++; if (game.winner === seat) wins[d.id][0]++; });
-    if ((g + 1) % 100 === 0) process.stdout.write(`    ${g + 1}/${n} games\n`);
-  }
+  const specs = [];
+  for (let g = 0; g < n; g++) specs.push({ pod: R.shuffle(decks.slice()).slice(0, 4).map((d) => d.id), seed: seed0 + g, explore, collect: true });
+  const res = await runGames(specs, nn, nn ? 'gen' + seed0 : null, 'games');
+  res.forEach((r, g) => {
+    const sp = specs[g];
+    if (r.runaway) console.log(`    game ${sp.seed} got stuck in a loop and was called a draw (${sp.pod.join(', ')})`);
+    out.push(...r.out); hands.push(...r.hands);
+    sp.pod.forEach((id, seat) => { wins[id][1]++; if (r.winner === seat) wins[id][0]++; });
+  });
   return { out, hands, wins };
 }
 function fit(net, data, epochs, lr) {
@@ -73,9 +118,9 @@ const t0 = Date.now();
 let base = prev ? prev.base : {};
 for (let k = 0; k < GENS; k++) {
   gen++;
-  const nn = gen > 1 || prev ? Game.loadNN({ ...pack(), base, generation: gen - 1 }) : null;
-  console.log(`Generation ${gen}: playing ${N} games ${nn ? 'with the network' : 'with the plain heuristics'}...`);
-  const { out, hands, wins } = play(N, 100000 * gen, nn, 6);
+  const nn = gen > 1 || prev ? { ...pack(), base, generation: gen - 1 } : null; // (as JSON: each worker loads it)
+  console.log(`Generation ${gen}: playing ${N} games ${nn ? 'with the network' : 'with the plain heuristics'} on ${CORES} cores...`);
+  const { out, hands, wins } = await play(N, 100000 * gen, nn, 6);
   buffer.push({ out, hands }); if (buffer.length > 3) buffer.shift();
   base = Object.fromEntries(ids.map((id) => [id, wins[id][1] ? wins[id][0] / wins[id][1] : 0.25]));
   const qs = fit(q, buffer.flatMap((b) => b.out), 4, 0.002);
@@ -103,12 +148,10 @@ const insights = Object.fromEntries(Object.entries(adv).map(([deck, cards]) => {
 // A/B test: one random seat lets the network steer, the other three use the plain heuristics
 console.log(`A/B test: ${AB} games, one seat with the network...`);
 const S = Object.fromEntries(ids.map((id) => [id, { on: 0, onW: 0, off: 0, offW: 0 }]));
-for (let g = 0; g < AB; g++) {
-  const pod = R.shuffle(decks.slice()).slice(0, 4);
-  const seat = Math.floor(R() * 4);
-  const game = new Game(pod, db, 900000 + g, { record: false, nn: nnAll, nnSeats: [seat] }).run();
-  pod.forEach((d, i) => { const s = S[d.id]; if (i === seat) { s.on++; if (game.winner === i) s.onW++; } else { s.off++; if (game.winner === i) s.offW++; } });
-}
+const abSpecs = [];
+for (let g = 0; g < AB; g++) { const pod = R.shuffle(decks.slice()).slice(0, 4).map((d) => d.id); const seat = Math.floor(R() * 4); abSpecs.push({ pod, seed: 900000 + g, nnSeats: [seat] }); }
+const abRes = await runGames(abSpecs, { ...pack(), base, generation: gen }, 'final', 'A/B games');
+abRes.forEach((r, g) => { const { pod, nnSeats: [seat] } = abSpecs[g]; pod.forEach((id, i) => { const s = S[id]; if (i === seat) { s.on++; if (r.winner === i) s.onW++; } else { s.off++; if (r.winner === i) s.offW++; } }); });
 let on = 0, onW = 0, off = 0, offW = 0;
 for (const id of ids) { const s = S[id]; on += s.on; onW += s.onW; off += s.off; offW += s.offW; }
 const ab = { games: AB, on: +(onW / on).toFixed(4), off: +(offW / off).toFixed(4), decks: Object.fromEntries(ids.map((id) => [id, { on: S[id].on ? +(S[id].onW / S[id].on).toFixed(3) : null, off: S[id].off ? +(S[id].offW / S[id].off).toFixed(3) : null, n: S[id].on }])) };
@@ -118,3 +161,7 @@ console.log(`  ALL        with network ${(ab.on * 100).toFixed(1)}%  without ${(
 
 fs.writeFileSync(OUT, JSON.stringify({ generation: gen, games: (prev ? prev.games : 0) + GENS * N, when: new Date().toISOString(), ...pack(), base, history, insights, ab }));
 console.log(`Wrote ${OUT} (generation ${gen}, ${((Date.now() - t0) / 1000).toFixed(0)}s).`);
+for (const w of workers || []) w.kill();
+}
+
+if (!process.env.TRAIN_WORKER) await main();

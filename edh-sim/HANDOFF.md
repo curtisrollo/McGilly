@@ -19,7 +19,8 @@ a heuristic AI steered by a small neural network, and a single-page web app publ
 - New bug: write the scenario first, confirm it fails on the old engine, then fix.
 
 ## Heavy jobs
-- `sh retrain.sh [gens games ab]`: train, build, commit and push in one go (default 4 x 800, A/B 2000; ~1 hour).
+- `sh retrain.sh [gens games ab]`: train, build, commit and push in one go (default 4 x 800, A/B 2000). Games run on
+  worker processes, one per core (`--cores`); a run gives exactly the same network on 1 core or many.
 - Win rates: play N four-player games with random pods and count winners per deck (25% is an even share).
 
 ## Where things stand
@@ -48,6 +49,5 @@ a heuristic AI steered by a small neural network, and a single-page web app publ
 - A/B harness pattern: `looseSeats: [seat]` gives one seat the new candidates; 25% is an even share.
 
 ## Open ideas
-- Parallelise training across CPU cores (worker threads) to make bigger runs cheap.
 - Remaining small audit items: Staff of Domination untap creature, Goblin Welder on opponents' artifacts, Lattice colour
   changes, Yawgmoth -1/-1 setup for proliferate, Academy Rector trigger ordering with Myrkul.
