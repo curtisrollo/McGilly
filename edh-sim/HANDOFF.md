@@ -30,6 +30,18 @@ a heuristic AI steered by a small neural network, and a single-page web app publ
 - Recent AI work: look-ahead on engine turns, attack/removal targeting by threat, wipes held for real trades or danger,
   graveyard-hate awareness (Valgavoth/Dauthi), Beledros untap, Coffers+Urborg, draw-budget guards against decking.
 
+## How the AI should improve (agreed direction)
+- General engine, general AI: no card-specific AI rules. A card's behaviour comes from its parsed effects; AI rules work on
+  how a card makes value (static while on the battlefield, activated ability, triggers, one-shot, body).
+- Judge by outcome: the look-ahead plays a choice out on a copy of the game (`cloneForLook`) and scores the board with
+  `lookValue`. In the main phase it also tries abilities the rules score at 0 or below (`abilityOptions(..., loose)`) and
+  "do nothing" (`lookPick`); in combat it tries the attack without each attacker that could die, and no attack.
+  With it, Hermit Druid stays home and Yawgmoth + Dictate of Erebos runs with no rule for either (checked by switching
+  those rules off). Rules are a shortlist; the look-ahead decides.
+- Next: an automatic mistake-finder (where the AI's pick and the look-ahead's best differ most, with seed and turn), then
+  the network as the board scorer, with training spread across cores.
+- A/B harness pattern: `looseSeats: [seat]` gives one seat the new candidates; 25% is an even share.
+
 ## Open ideas
 - Parallelise training across CPU cores (worker threads) to make bigger runs cheap.
 - Remaining small audit items: Staff of Domination untap creature, Goblin Welder on opponents' artifacts, Lattice colour

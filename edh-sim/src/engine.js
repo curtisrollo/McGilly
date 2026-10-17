@@ -906,6 +906,7 @@
       this.nnSeats = opts.nnSeats || null;          // which seats let it steer their choices (default: all)
       this.collect = !!opts.collect;                // record training samples (state, card) for train.mjs
       this.explore = opts.explore || 0;             // random noise on choices while training, so the net sees variety
+      this.looseSeats = opts.looseSeats || null;   // A/B tests: only these seats let the look-ahead try abilities the rules would not use
       this.lookahead = opts.lookahead !== false && !(typeof process !== 'undefined' && process.env && process.env.NOLOOK);    // try the best few plays on a copy of the game before choosing (see lookPick)
       this.lookSeats = opts.lookSeats || null;      // which seats search (default: all)
       this.politics = opts.politics ?? (typeof process !== 'undefined' && process.env && process.env.POLITICS ? +process.env.POLITICS : 40); // weight on attacking whoever is most likely to win
@@ -4016,24 +4017,31 @@
       if (g.winner === seat) return 1000;
       if (p.lost || (g.over && g.winner !== seat)) return -1000;
       const opps = g.opps(p);
-      let v = (g.players.length - 1 - opps.length) * 60 + opps.reduce((a, q) => a + Math.min(40, 40 - q.life) * 0.5 + q.poison * 3 - g.playerThreat(q) * 0.15, 0);
+      let v = (g.players.length - 1 - opps.length) * 60 + opps.reduce((a, q) => a + Math.min(40, 40 - q.life) * 0.5 + q.poison * 3 - g.playerThreat(q) * 0.35, 0); // their boards count too: an edict on every opponent is worth a lot
       v += g.playerThreat(p) * 0.6 + p.hand.length * 1.5 + (p.infMana ? 25 : 0) + (opps.length && g.locked(opps[0]) ? 60 : 0) - (g.locked(p) ? 60 : 0) + Math.min(p.life, 40) * 0.2;
       if (g.nnOn(p)) v += 80 * g.nnV(p);
       return v;
     }
     // Try each candidate play on a copy, finish the main phase greedily, and compare. Returns the better pick, or null to keep the greedy one.
-    lookPick(p, second, options, abs, greedy) {
-      const cands = [greedy], gs = (greedy.o || greedy.ab).s, close = (x) => x.s >= gs * 0.35;
-      for (const o of options.slice(0, 3)) if ((!greedy.o || o.c.id !== greedy.o.c.id) && close(o)) cands.push({ o });
-      for (const a of abs.slice(0, 2)) if ((!greedy.ab || a.key !== greedy.ab.key) && close(a)) cands.push({ ab: a });
-      if (cands.length < 2) return null;
+    // greedy null means the rules would end the main phase here ({ pass: true }). loose: abilities the rules score at 0 or
+    // below; they are tried too, so a line the rules undervalue (sacrifices with Dictate of Erebos) is judged by what it does.
+    lookPick(p, second, options, abs, greedy, loose = []) {
+      const g0 = greedy || { pass: true }, cands = [g0];
+      const gs = greedy ? (greedy.o || greedy.ab).s : 0, close = (x) => x.s >= gs * 0.35;
+      if (greedy) {
+        for (const o of options.slice(0, 3)) if ((!greedy.o || o.c.id !== greedy.o.c.id) && close(o)) cands.push({ o });
+        for (const a of abs.slice(0, 2)) if ((!greedy.ab || a.key !== greedy.ab.key) && close(a)) cands.push({ ab: a });
+      }
       // only on engine turns, where order matters: an activated ability competes with the spells, or a combo is within reach
-      if (!cands.some((c) => c.ab) && !this.comboWants(p).length) return null;
+      if (!loose.length && (cands.length < 2 || (!cands.some((c) => c.ab) && !this.comboWants(p).length))) return null;
+      for (const a of loose.slice(0, 3)) cands.push({ ab: a, loose: true });
+      if (cands.length < 2) return null;
       const res = cands.map((pk) => {
         try {
           const g = this.cloneForLook(), pp = g.players[p.seat];
           const used = g._usedAbilities && g._usedAbilities.turn === g.turn ? g._usedAbilities.set : new Set(); g._usedAbilities = { turn: g.turn, set: used };
-          if (pk.ab) { const a = g.abilityOptions(pp, second, used).find((x) => x.key === pk.ab.key); if (!a) return -Infinity; used.add(a.key); g.doActivate(pp, a); }
+          if (pk.ab) { const a = g.abilityOptions(pp, second, used, !!pk.loose).find((x) => x.key === pk.ab.key); if (!a) return -Infinity; used.add(a.key); g.doActivate(pp, a); }
+          else if (pk.pass) { /* end the main phase's spells here: mainPhase below finds nothing worth doing and moves on */ }
           else { const c = g.cards[pk.o.c.id]; if (!c || !g.castSpell(pp, c, pk.o.from, pk.o.gyType)) return -Infinity; g.playLand(pp); }
           if (!g.over && !pp.lost) g.mainPhase(pp, second);
           // from the first main phase, play the rest of the turn too: a creature cast now attacks, mana held up isn't wasted
@@ -4062,7 +4070,12 @@
         const abs = this.abilityOptions(p, second, used), ab = abs[0];
         // look ahead: when there is a real choice, try the best few plays on a copy of the game and keep the one whose turn ends best
         let pick = ab && (!options.length || ab.s > options[0].s) ? { ab } : options.length ? { o: this.bestSequence(p, options) } : null;
-        if (pick && this.lookahead && !this._inLook && !p.infMana && (!this.lookSeats || this.lookSeats.includes(p.seat))) pick = this.lookPick(p, second, options, abs, pick) || pick;
+        if (this.lookahead && !this._inLook && !p.infMana && (!this.lookSeats || this.lookSeats.includes(p.seat))) {
+          // abilities the rules would not use: the look-ahead plays each out and keeps it only if the turn ends clearly better
+          const loose = this.looseLook === false || (this.looseSeats && !this.looseSeats.includes(p.seat)) ? [] : this.abilityOptions(p, second, used, true).filter((a) => !abs.some((b) => b.key === a.key));
+          if (pick || loose.length) pick = this.lookPick(p, second, options, abs, pick, loose) || pick;
+          if (pick && pick.pass) pick = null;
+        }
         if (!pick) { if (this.beledrosUntap(p)) continue; break; }
         if (pick.ab) { used.add(pick.ab.key); this.doActivate(p, pick.ab); continue; }
         const o = pick.o;
@@ -4242,7 +4255,8 @@
       } finally { this._untapProbe = false; }
     }
     // Can this ability be activated now, and what would it cost (mana, fodder)? null when not.
-    prepareAbility(p, c, ab, postCombat) {
+    // loose: for the look-ahead's candidates, skip the judgement calls (life floor) and keep only what is impossible
+    prepareAbility(p, c, ab, postCombat, loose = false) {
       const elixir = this.has(p, 'elixir');
       if (c.zone !== 'bf') return null;
       if (this.karnStops(p, c)) return null;
@@ -4258,7 +4272,7 @@
       if (ab.tap && c.info.isCreature && !postCombat && !ab.preCombat && !loopNow && !this.hasKw(c, 'vigilance') && this.canAttack(c) && !bigAb) return null; // creatures prefer to attack first
       if (ab.sorcery && postCombat === undefined) return null;
       if (ab.minArtifacts && p.bf.filter((x) => x.info.types.has('Artifact')).length < ab.minArtifacts) return null;
-      if (ab.life && !this.canPayLife(p, ab.life, this.abilityWinsNow(p, ab, c))) return null; // keeps us above what the table can hit us for, unless this wins
+      if (ab.life && !(loose ? p.life - ab.life >= 1 : this.canPayLife(p, ab.life, this.abilityWinsNow(p, ab, c)))) return null; // keeps us above what the table can hit us for, unless this wins
       if (ab.sacOther && !ab.sacArtifact && !ab.sacCreature && !ab.sacArtifactN) return null;
       if (ab.discard && p.hand.length < ab.discard + 1) return null;
       if ((ab.sacCreature || ab.discard) && !ab.fx.some((f) => ['draw', 'tutor', 'damage', 'removal', 'search', 'drain', 'tokens', 'proliferate', 'millPower'].includes(f.k))) return null;
@@ -4429,7 +4443,7 @@
       this.checkState();
     }
     // Activated abilities that are worth doing now, best first
-    abilityOptions(p, postCombat, used) {
+    abilityOptions(p, postCombat, used, loose = false) {
       const out = [];
       for (const c of p.bf) {
         if (c.zone !== 'bf') continue;
@@ -4437,8 +4451,8 @@
           // an untapped-cost ability (Yawgmoth's) can go again while it is still worth it
           const again = used && used.has(c.id + ':' + i);
           if (again && (ab.tap || ab.sac || !(ab.sacCreature || ab.discard))) return;
-          const prep = this.prepareAbility(p, c, ab, postCombat);
-          if (prep) { prep.key = c.id + ':' + i; prep.s = this.abilityScore(p, prep) - (again ? 8 : 0); if (prep.s > 0) out.push(prep); }
+          const prep = this.prepareAbility(p, c, ab, postCombat, loose);
+          if (prep) { prep.key = c.id + ':' + i; const sc = this.abilityScore(p, prep); prep.s = sc - (again ? 8 : 0); if (prep.s > 0 || (loose && sc !== -1)) out.push(prep); }
         });
       }
       return out.sort((a, b) => b.s - a.s);
@@ -4454,7 +4468,7 @@
         this.doActivate(p, best);
       }
       if (this.myrkulSacs(p)) this.activateAbilities(p, postCombat);
-      if (postCombat) this.lateGameMana(p);
+      if (postCombat && !p.lost && !this.over) this.lateGameMana(p);
     }
     // Myrkul: sacrifice creatures that are better as enchantment copies (enters triggers again, keeps its abilities)
     myrkulSacs(p) {
@@ -4497,14 +4511,16 @@
       // Beledros: pay 10 life to untap lands when there is something big to cast
       if (this.beledrosUntap(p)) this.mainPhase(p, 'again');
       // Infinity stones: harness when there's mana to spare
-      for (const c of p.bf) if (c.info.harness && !c.harnessed) {
+      for (const c of p.bf) if (c.info.harness && !c.harnessed && !p.lost && !this.over) {
         const cost = parseCost(c.info.harness.cost);
         const fod = c.info.harness.exileCreature ? p.bf.filter((x) => x.info.isCreature && !x.isCommander).sort((a, b) => this.creatureValue(a) - this.creatureValue(b))[0] : null;
         if (c.info.harness.exileCreature && !fod) continue;
         if (c.tapped || !this.pay(p, cost)) continue;
-        this.pay(p, cost, 0, true); c.tapped = true; c.harnessed = true;
-        if (fod) this.exileCard(fod);
+        this.pay(p, cost, 0, true);
+        if (p.lost || this.over) return; // paying can sacrifice creatures (Ashnod's Altar), and their death draws can end the game
+        c.tapped = true; c.harnessed = true;
         this.emit('ability', `${p.name} harnesses ${c.info.name}.`, { seat: p.seat, cards: [c.id] });
+        if (fod) this.exileCard(fod);
       }
       // The Chain Veil: reuse loyalty abilities
       const veil = p.bf.find((c) => c.info.chainVeil && !c.tapped);
@@ -4676,7 +4692,7 @@
       if (p.lost || this.over) return;
       let cands = p.bf.filter((c) => this.canAttack(c));
       if (!cands.length) return;
-      const q = this.chooseDefender(p, cands);
+      const q = this._forcedAtk ? this.P(this._forcedAtk.q) : this.chooseDefender(p, cands);
       if (!q) return;
       const blockers = q.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b));
       const totalPower = cands.reduce((s, a) => s + this.power(a), 0);
@@ -4768,6 +4784,27 @@
         // unless attacking costs nothing (vigilance) or they have an attack trigger worth having
         if (lethalish && needed.size < attackers.length) {
           for (const a of attackers.slice()) if (!needed.has(a) && !this.hasKw(a, 'vigilance') && !a.info.mustAttack && !a.info.attack.length) attackers.splice(attackers.indexOf(a), 1);
+        }
+      }
+      // Look-ahead on the attack: when a creature could die to a block, play the combat out on copies of the game (the
+      // defender blocks with its own logic) with and without each risky attacker, and with no attack, and keep the best.
+      if (this._forcedAtk) attackers.splice(0, attackers.length, ...this._forcedAtk.ids.map((id) => this.cards[id]).filter((c) => c && c.zone === 'bf' && this.canAttack(c)));
+      else if (this.lookahead && !this._inLook && !this._forceAttack && attackers.length && this.looseLook !== false && (!this.looseSeats || this.looseSeats.includes(p.seat)) && (!this.lookSeats || this.lookSeats.includes(p.seat))) {
+        const killedBy = (a) => blockers.some((b) => this.canBlock(b, a) && ((this.power(b) >= this.toughness(a) - a.dmg) || (this.hasKw(b, 'deathtouch') && this.power(b) > 0)) && !this.hasKw(a, 'indestructible'));
+        const risky = attackers.filter(killedBy).sort((x, y) => this.creatureValue(y) - this.creatureValue(x)).slice(0, 3);
+        if (risky.length) {
+          const plans = [attackers.slice(), ...risky.map((r) => attackers.filter((a) => a !== r)), []];
+          const res = plans.map((plan) => {
+            try {
+              const g = this.cloneForLook(), pp = g.players[p.seat];
+              g._forcedAtk = { q: q.seat, ids: plan.map((a) => a.id) }; g.combat(pp); g._forcedAtk = null;
+              if (!g.over && !pp.lost) { g.emptyPools(); g.phase = 'main 2'; g.mainPhase(pp, true); }
+              return g.lookValue(g, p.seat);
+            } catch (e) { return -Infinity; }
+          });
+          let bi = 0; for (let i = 1; i < res.length; i++) if (res[i] > res[bi]) bi = i;
+          if (bi > 0 && res[bi] > res[0] + 4) attackers.splice(0, attackers.length, ...plans[bi]);
+          if (!attackers.length) return;
         }
       }
       // Sphere of Safety: pay X per attacker
