@@ -1,6 +1,16 @@
 // Scenarios for the atraxa deck. Same shape as ../scenarios.mjs.
 const pw = (c, d) => c.info.loyaltyAbs.find((x) => x.delta === d);
 export default [
+  {
+    card: 'Ugin, the Spirit Dragon', title: 'with astronomical loyalty, choosing X for -X still finishes at once',
+    wrong: 'the AI tried every X from 1 to the loyalty (billions after doubling and proliferate), which hung a training run',
+    run({ table, put }) {
+      const g = table(); const me = g.players[0]; const u = put(g, me, 'Ugin, the Spirit Dragon'); u.loyalty = 2e9;
+      const t0 = Date.now(); g.walkerOnce(me, u);
+      const ms = Date.now() - t0;
+      return { ok: ms < 2000, note: `${ms} ms` };
+    },
+  },
   // ---------- rules ----------
   {
     card: 'Vorinclex, Monstrous Raider', title: 'doubles the poison counters you give a player when you proliferate',

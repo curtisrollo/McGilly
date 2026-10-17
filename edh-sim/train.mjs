@@ -58,23 +58,37 @@ if (process.env.TRAIN_WORKER) {
   });
 }
 // the worker pool: games go out in small chunks to whichever worker is free; results come back in order
+// Watchdog: a chunk that takes longer than WATCHDOG minutes means a game is stuck in a loop the engine's own limit
+// doesn't see. That worker is killed and replaced, the chunk's games count as draws (logged by seed), and training
+// goes on: a run can't hang again, whatever the bug.
+const WATCHDOG = arg('watchdog', 10);
 let workers = null;
+const spawn = () => fork(new URL(import.meta.url).pathname, process.argv.slice(2), { env: { ...process.env, TRAIN_WORKER: '1' }, serialization: 'advanced' });
 function runGames(specs, nn, nnKey, label) {
-  if (!workers) workers = Array.from({ length: CORES }, () => fork(new URL(import.meta.url).pathname, process.argv.slice(2), { env: { ...process.env, TRAIN_WORKER: '1' }, serialization: 'advanced' }));
+  if (!workers) workers = Array.from({ length: CORES }, spawn);
   const res = new Array(specs.length), CH = 10;
   let next = 0, done = 0, shown = 0;
   return new Promise((resolve) => {
-    const give = (w) => {
-      if (next >= specs.length) return;
-      const id = next; next += CH;
-      w.once('message', (m) => {
-        m.res.forEach((r, i) => (res[m.id + i] = r)); done += m.res.length;
-        while (label && done - shown >= 100) { shown += 100; process.stdout.write(`    ${shown}/${specs.length} ${label}\n`); }
-        if (done >= specs.length) resolve(res); else give(w);
-      });
-      w.send({ id, specs: specs.slice(id, id + CH), nn, nnKey });
+    const finish = (id, list) => {
+      list.forEach((r, i) => (res[id + i] = r)); done += list.length;
+      while (label && done - shown >= 100) { shown += 100; process.stdout.write(`    ${shown}/${specs.length} ${label}\n`); }
+      if (done >= specs.length) resolve(res);
     };
-    for (const w of workers) give(w);
+    const give = (k) => {
+      if (next >= specs.length) return;
+      const id = next, chunk = specs.slice(id, id + CH); next += CH;
+      const w = workers[k];
+      const timer = setTimeout(() => {
+        w.removeAllListeners('message'); w.kill('SIGKILL');
+        console.log(`    watchdog: games ${chunk[0].seed}-${chunk[chunk.length - 1].seed} took over ${WATCHDOG} min (a loop); counted as draws (${chunk.map((sp) => sp.pod.join('/')).slice(0, 1)}...)`);
+        workers[k] = spawn(); // (it loads the network from its first job)
+        finish(id, chunk.map(() => ({ winner: null, runaway: true, out: [], hands: [] })));
+        give(k);
+      }, WATCHDOG * 60000);
+      w.once('message', (m) => { clearTimeout(timer); finish(m.id, m.res); give(k); });
+      w.send({ id, specs: chunk, nn, nnKey });
+    };
+    workers.forEach((_, k) => give(k));
   });
 }
 async function main() {

@@ -2879,7 +2879,7 @@
           const m = this.mill(q, n); this.emit('effect', `${name}: ${q.name} mills ${m.length}.`, { seat: p.seat, target: q.seat });
           break;
         }
-        case 'removalN': { const n = X(fx.n) || 0; for (let i = 0; i < n; i++) this.resolveEffect(p, { k: 'removal', what: fx.what }, src, 0, quiet); break; }
+        case 'removalN': { const n = Math.min(X(fx.n) || 0, this.opps(p).reduce((a2, q) => a2 + q.bf.length, 0)); for (let i = 0; i < n; i++) this.resolveEffect(p, { k: 'removal', what: fx.what }, src, 0, quiet); break; }
         case 'extraLandNow': p.landsPlayed = Math.max(0, p.landsPlayed - 1); p.extraLandsGranted = (p.extraLandsTurn === this.turn ? p.extraLandsGranted || 0 : 0) + 1; p.extraLandsTurn = this.turn; break;
         case 'putFromHand': { const put = p.hand.filter((c) => c.info.isPermanent && !c.info.isLand).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a)).slice(0, fx.n); for (const c of put) { if (c.zone !== 'hand' || !p.hand.includes(c)) continue; this.removeFrom(p.hand, c); this.enterBattlefield(c, p, { quiet: true }); } /* (one entering can make us discard another: Quicksmith Genius) */ if (put.length) this.emit('cast', `${name}: ${p.name} puts ${put.length} permanents onto the battlefield.`, { seat: p.seat, cards: put.map((c) => c.id) }); break; }
         case 'ragavan': { const q = this._combatDefender; if (q && q.library.length) { const c = q.library.shift(); c.ctrl = p.seat; c.zone = 'hand'; c.impulseTurn = this.turn; c.stolenFrom = q.seat; p.hand.push(c); this.emit('effect', `Ragavan exiles ${c.info.name} from ${q.name}'s library; ${p.name} may cast it this turn.`, { seat: p.seat, cards: [c.id] }); } break; }
@@ -4782,6 +4782,7 @@
 
     walkerOnce(p, c) {
       if (p.lost || this.over) return false;
+      if (++this.steps > Game.STEP_LIMIT) throw new Runaway(); // walker activations count toward the runaway limit too
       const abs = c.info.loyaltyAbs;
       if (!abs.length) return false;
       const carth = this.has(p, 'carth') ? 1 : 0;
@@ -4790,7 +4791,9 @@
         if (delta === -98) {
           // Ugin -X: pick the X that exiles the most opposing value
           let best = 0, bestX = 0;
-          for (let x = 1; x <= c.loyalty; x++) {
+          // no point going above the highest mana value out there (loyalty can be astronomical: this hung training)
+          const top = Math.max(0, ...this.allBf().map((y) => y.info.mv || 0));
+          for (let x = 1; x <= Math.min(c.loyalty, top); x++) {
             const hit = (q) => q.bf.filter((y) => !y.info.isLand && y.info.colors && y.info.colors.size && y.info.mv <= x).reduce((s2, y) => s2 + this.permValue(y), 0);
             const v = Math.max(0, ...this.opps(p).map(hit)) - hit(p);
             if (v > best) { best = v; bestX = x; }
