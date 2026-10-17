@@ -112,6 +112,16 @@ export default [
     },
   },
   {
+    card: 'Phantasmal Image', title: 'copies the best permanent it can keep, not our own Muldrotha (legend rule) (seed 88168351)',
+    wrong: 'it copied the most valuable permanent on the table, our own legendary commander, and one of the two died at once',
+    run({ table, card, put }) {
+      const [g, me, opp] = setup(table); put(g, opp, 'Balefire Dragon'); const img = card(g, me, 'Phantasmal Image', 'hand');
+      g.removeFrom(me.hand, img); g.enterBattlefield(img, me, { quiet: true });
+      const muls = me.bf.filter((x) => x.info.name === 'Muldrotha, the Gravetide').length;
+      return { ok: img.zone === 'bf' && img.info.name === 'Balefire Dragon' && muls === 1, note: `Image is ${img.zone === 'bf' ? 'a copy of ' + img.info.name : 'in ' + img.zone}` };
+    },
+  },
+  {
     card: 'Glacial Chasm', title: 'is played when the table could kill us next turn',
     wrong: '(new behaviour) it was played like any land, or from the graveyard only under a fixed 15-life rule',
     run({ table, card, put }) {

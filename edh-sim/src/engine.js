@@ -1551,11 +1551,19 @@
         this.addToken(q, { p: 1, t: 1, sub: 'Vampire', colors: 'white', kw: ['lifelink'] }, 1, true);
       }
     }
+    // What copying x is worth to p. A copy of a legend p already controls dies to the legend rule at once (Phantasmal
+    // Image on our own Muldrotha), unless the copy isn't legendary or the legend rule is off for us (Sakashima).
+    copyWorth(p, info, x, self = null) {
+      const cp = info.copy;
+      const clash = !cp.nonLegendary && x.info.isLegendary && !this.has(p, 'noLegendRule') && !(cp.keepAbilities && info.statics.some((st) => st.k === 'noLegendRule')) && p.bf.some((y) => y !== self && y.info.name === x.info.name);
+      return clash ? 0 : this.permValue(x);
+    }
     copyOnEnter(c, p) {
       const cp = c.info.copy;
       const pool = (cp.own ? p.bf : this.allBf()).filter((x) => x !== c && (cp.what === 'creature' ? x.info.isCreature : cp.what === 'artifact' ? x.info.types.has('Artifact') : (x.info.isCreature || x.info.isPW)) && !x.token);
-      const best = pool.sort((a, b) => this.permValue(b) - this.permValue(a))[0];
-      if (!best || (cp.optional && this.permValue(best) < 6)) return;
+      const worth = (x) => this.copyWorth(p, c.info, x, c);
+      const best = pool.sort((a, b) => worth(b) - worth(a))[0];
+      if (!best || worth(best) <= 0 || (cp.optional && worth(best) < 6)) return;
       const base = best.baseInfo || best.info;
       const keep = { copy: null, scripted: true };
       if (cp.nonLegendary) { keep.isLegendary = false; keep.types = new Set([...base.types].filter((t) => t !== 'Legendary')); }
@@ -3499,7 +3507,7 @@
       }
       // enchantress engines (Argothian Enchantress, Sythis, Eidolon of Blossoms, The Great Henge): the spell draws cards too
       { const extra = this.castDraws(p, c, true); if (extra) s += Math.min(extra, 4) * 4; }
-      if (i.copy) { const pool = (i.copy.own ? p.bf : this.allBf()).filter((x) => (i.copy.what === 'artifact' ? x.info.types.has('Artifact') : x.info.isCreature || (i.copy.what === 'creaturepw' && x.info.isPW))); const best = Math.max(0, ...pool.map((x) => this.permValue(x))); if (best < 6 && !i.mana) return -1; s += best; }
+      if (i.copy) { const pool = (i.copy.own ? p.bf : this.allBf()).filter((x) => (i.copy.what === 'artifact' ? x.info.types.has('Artifact') : x.info.isCreature || (i.copy.what === 'creaturepw' && x.info.isPW))); const best = Math.max(0, ...pool.map((x) => this.copyWorth(p, i, x))); if (best < 6 && !i.mana) return -1; s += best; }
       // being conscious of life: don't cast a spell whose life loss we can't afford
       {
         let pay = 0;
