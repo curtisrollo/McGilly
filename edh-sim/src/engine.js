@@ -1982,7 +1982,7 @@
           else if (ec.k === 'opps') untapped = this.opps(p).length >= 2;
           if (!untapped) c.tapped = true;
         }
-        if (/enters, sacrifice a land/i.test(c.info.text)) { const l = p.bf.filter((x) => x.info.isLand && x !== c).sort((a, b) => this.landValue(p, a) - this.landValue(p, b))[0]; if (l) this.destroy(l, 'sacrificed', true); }
+        if (/enters, sacrifice a land/i.test(c.info.text)) { const l = p.bf.filter((x) => x.info.isLand && x !== c).sort((a, b) => this.landKeep(p, a) - this.landKeep(p, b))[0]; if (l) this.destroy(l, 'sacrificed', true); }
         // landfall
         for (const src of [...p.bf]) for (const fx of (src.info.landfall || [])) this.resolveEffects(p, fx, src, null, true);
         // Archaeomancer's Map: an opponent pulls ahead on lands
@@ -2514,7 +2514,7 @@
           break;
         }
         case 'discardSelf': { for (let i = 0; i < fx.n && p.hand.length; i++) this.discardCard(p, fx.random ? p.hand[this.R.int(p.hand.length)] : p.hand.slice().sort((a, b) => this.cardValue(p, a) - this.cardValue(p, b))[0]); break; }
-        case 'sacLand': { const l = p.bf.filter((c) => c.info.isLand).sort((a, b) => this.landValue(p, a) - this.landValue(p, b))[0]; if (l) this.destroy(l, 'sacrificed', true); break; }
+        case 'sacLand': { const l = p.bf.filter((c) => c.info.isLand).sort((a, b) => this.landKeep(p, a) - this.landKeep(p, b))[0]; if (l) this.destroy(l, 'sacrificed', true); break; }
         case 'finale': {
           const x = Math.max(0, xVal);
           const pool = p.library.concat(p.gy).filter((c) => c.info.isCreature && c.info.mv <= x).sort((a, b) => this.creatureValue({ ...b, p1: 0, eot: { p: 0, t: 0, kw: [] }, ctrl: p.seat }) - this.creatureValue({ ...a, p1: 0, eot: { p: 0, t: 0, kw: [] }, ctrl: p.seat }));
@@ -3606,7 +3606,7 @@
       if (k === 'discard1' || k === 'discard2') { const n = k === 'discard2' ? 2 : 1; if (others.length < n) return false; if (commit) for (let i = 0; i < n; i++) { const d = others.filter((x) => p.hand.includes(x)).sort((a, b) => this.cardValue(p, a) - this.cardValue(p, b))[0]; this.discardCard(p, d); } return true; }
       if (k === 'discardOrLife3') { if (this.canPayLife(p, 3)) { if (commit) this.loseLife(p, 3); return true; } if (!others.length) return false; if (commit) { const d = others.slice().sort((a, b) => this.cardValue(p, a) - this.cardValue(p, b))[0]; this.discardCard(p, d); } return true; }
       if (k === 'sacCreature') { const f = p.bf.filter((x) => x.info.isCreature && !x.isCommander).sort((a, b) => this.creatureValue(a) - this.creatureValue(b))[0]; if (!f || this.creatureValue(f) > 6) return false; if (commit) this.destroy(f, 'sacrificed', true); return true; }
-      if (k === 'sacLand') { const f = p.bf.filter((x) => x.info.isLand).sort((a, b) => this.landValue(p, a) - this.landValue(p, b))[0]; if (!f) return false; if (commit) this.destroy(f, 'sacrificed', true); return true; }
+      if (k === 'sacLand') { const f = p.bf.filter((x) => x.info.isLand).sort((a, b) => this.landKeep(p, a) - this.landKeep(p, b))[0]; if (!f) return false; if (commit) this.destroy(f, 'sacrificed', true); return true; }
       return true;
     }
 
@@ -3868,7 +3868,7 @@
         if (c.info.cumulativeLife) {
           c.age = (c.age || 0) + 1;
           const cost = c.age * c.info.cumulativeLife;
-          if (this.canPayLife(p, cost)) { this.loseLife(p, cost); this.emit('effect', `${p.name} pays ${cost} life to keep ${c.info.name}.`, { seat: p.seat, cards: [c.id] }); }
+          if (this.canPayLife(p, cost) && this.worthKeeping(p, c, cost)) { this.loseLife(p, cost); this.emit('effect', `${p.name} pays ${cost} life to keep ${c.info.name}.`, { seat: p.seat, cards: [c.id] }); }
           else { this.destroy(c, 'sacrificed', true); this.emit('effect', `${p.name} lets ${c.info.name} go.`, { seat: p.seat, cards: [c.id] }); }
         }
         if (c.harnessed && c.info.harness.upkeep) this.resolveEffects(p, c.info.harness.upkeep, c, `${c.info.name} (harnessed)`);
@@ -3914,6 +3914,34 @@
       for (const c of [...p.bf]) if (c.info.bmc) this.blackMarket(p, c);
       this.checkState(); if (p.lost || this.over) return;
       this.restOfTurn(p, 'main');
+    }
+    // Cumulative upkeep: keep paying only if the turn goes better with the card than without it. Played out both ways
+    // on copies to the start of our next turn (Glacial Chasm stops our own attacks: with a winning board, let it go).
+    worthKeeping(p, c, cost) {
+      if (!this.lookahead || this._inLook) return true;
+      const val = (keep) => {
+        let t = 0;
+        for (let k = 0; k < 2; k++) {
+          try {
+            this._lookN = (this._lookN || 0) + 1;
+            const g = this.cloneForLook(), pp = g.players[p.seat], cc = g.cards[c.id];
+            if (keep) g.loseLife(pp, cost); else if (cc && cc.zone === 'bf') g.destroy(cc, 'sacrificed', true);
+            if (!g.over && !pp.lost) { g.checkState(); g.restOfTurn(pp, 'main'); }
+            if (!g.over && !pp.lost) g.playToTurnOf(p.seat);
+            t += g.lookValue(g, p.seat);
+          } catch (e) { t += keep ? 0 : -1e6; }
+        }
+        return t / 2;
+      };
+      return val(true) >= val(false) - 2;
+    }
+    // Play a copy on to the start of `seat`'s next turn, or the end of the game (for look-aheads past this turn)
+    playToTurnOf(seat) {
+      for (let guard = 0; guard < 8 && !this.over; guard++) {
+        do { this.active = (this.active + 1) % this.players.length; } while (this.P(this.active).lost && !this.over);
+        if (this.over || this.active === seat) break;
+        this.takeTurn(this.P(this.active), false);
+      }
     }
     // The turn from a given phase on (main, combat, main 2, end). The mistake-finder's judge picks up a copied game
     // mid-turn with it, so a copy finishes the turn exactly the way a real turn goes.
@@ -3992,11 +4020,41 @@
       if (modes.length) this.emit('effect', `Black Market Connections: ${p.name} chooses ${modes.join(', ')} (loses ${modes.reduce((s2, m) => s2 + ({ treasure: 1, draw: 2, merc: 3 })[m], 0)} life).`, { seat: p.seat, cards: [c.id] });
     }
 
+    // A land that stops our own attacks (Glacial Chasm) is played when the game goes better with it: played out both
+    // ways on copies to our next turn (stopping a big attack, buying time while we build, a turn we weren't attacking
+    // anyway). Without the look-ahead: only when the table can hit us for about our life.
+    lockLand(c) { return c.info.statics.some((st) => st.k === 'chasm'); }
+    // which land to give up first: the one making the least mana, but never one whose static ability matters
+    landKeep(p, c) { return this.landValue(p, c) + (c.info.statics.length ? 8 : 0); }
+    needLock(p) {
+      const c = p.hand.concat(this.has(p, 'muldrotha') && !p.gyCastTypes.has('Land') ? p.gy : []).find((x) => x.info.isLand && this.lockLand(x));
+      if (!c) return false;
+      if (!this.lookahead || this._inLook) return p.life <= this.lifeFloor(p);
+      if (p._lockCheck && p._lockCheck.turn === this.turn) return p._lockCheck.v; // once per turn
+      const val = (play) => {
+        let t = 0;
+        for (let k = 0; k < 2; k++) {
+          try {
+            this._lookN = (this._lookN || 0) + 1;
+            const g = this.cloneForLook(), pp = g.players[p.seat], cc = g.cards[c.id];
+            if (play) { const fromGy = cc.zone === 'gy'; g.removeFrom(fromGy ? pp.gy : pp.hand, cc); if (fromGy) pp.gyCastTypes.add('Land'); pp.landsPlayed++; g.enterBattlefield(cc, pp, { quiet: true }); }
+            else cc._noLock = true;
+            if (!g.over && !pp.lost) g.restOfTurn(pp, g.phase === 'main 2' ? 'main 2' : 'main');
+            if (!g.over && !pp.lost) g.playToTurnOf(p.seat);
+            t += g.lookValue(g, p.seat);
+          } catch (e) { t += play ? -1e6 : 0; }
+        }
+        return t / 2;
+      };
+      const v = val(true) > val(false) + 2;
+      p._lockCheck = { turn: this.turn, v };
+      return v;
+    }
     playLand(p) {
       if (p.lost || this.over) return;
       const allowed = 1 + this.statics(p, 'extraLand').reduce((s, x) => s + x.s.n, 0);
       while (p.landsPlayed < allowed) {
-        const lands = p.hand.filter((c) => c.info.isLand);
+        const lands = p.hand.filter((c) => c.info.isLand && (!this.lockLand(c) || (!c._noLock && this.needLock(p))));
         const mdfc = p.hand.filter((c) => c.info.mdfcLand);
         let pick = null, face = null;
         if ((this.has(p, 'landsFromTop') || p.bf.some((x) => x.info.citadel)) && p.library[0] && p.library[0].info.isLand) { pick = p.library.shift(); p.hand.push(pick); }
@@ -4004,11 +4062,11 @@
           pick = p.gy.filter((c) => c.info.isLand && !c.info.statics.some((st) => st.k === 'chasm')).sort((a, b) => this.landValue(p, b) - this.landValue(p, a))[0];
           this.removeFrom(p.gy, pick); p.gyCastTypes.add('Land'); p.hand.push(pick);
         }
-        else if (lands.length) pick = this.chooseLandDrop(p, lands);
+        else if (lands.length) pick = lands.find((c) => this.lockLand(c)) || this.chooseLandDrop(p, lands); // (only there when needLock said play it)
         else if (mdfc.length && p.bf.filter((c) => c.info.isLand).length < 6) { pick = mdfc[0]; face = pick.info.mdfcLand; }
         else if (this.has(p, 'landsFromTop') && p.library[0] && p.library[0].info.isLand) { pick = p.library.shift(); p.hand.push(pick); }
         else if (this.has(p, 'crucible') && p.gy.some((c) => c.info.isLand)) { pick = p.gy.filter((c) => c.info.isLand).sort((a, b) => this.landValue(p, b) - this.landValue(p, a))[0]; this.removeFrom(p.gy, pick); p.hand.push(pick); }
-        else if (this.has(p, 'muldrotha') && !p.gyCastTypes.has('Land')) { pick = p.gy.filter((c) => c.info.isLand && !(c.info.statics.some((st) => st.k === 'chasm') && p.life > 15)).sort((a, b) => this.landValue(p, b) - this.landValue(p, a))[0]; if (pick) { this.removeFrom(p.gy, pick); p.gyCastTypes.add('Land'); p.hand.push(pick); } }
+        else if (this.has(p, 'muldrotha') && !p.gyCastTypes.has('Land')) { pick = p.gy.filter((c) => c.info.isLand && (!this.lockLand(c) || (!c._noLock && this.needLock(p)))).sort((a, b) => this.landValue(p, b) - this.landValue(p, a))[0]; if (pick) { this.removeFrom(p.gy, pick); p.gyCastTypes.add('Land'); p.hand.push(pick); } }
         if (!pick) return;
         this.removeFrom(p.hand, pick);
         if (face) { pick.info = Object.assign(Object.create(Object.getPrototypeOf(face)), face, { faces: pick.info.faces }); }

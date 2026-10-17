@@ -38,14 +38,6 @@ function roles(c) {
   return r.join('+');
 }
 
-// play a copy on to the start of `seat`'s next turn (or the end of the game)
-function untilTurnOf(g, seat) {
-  for (let guard = 0; guard < 8 && !g.over; guard++) {
-    do { g.active = (g.active + 1) % g.players.length; } while (g.P(g.active).lost && !g.over);
-    if (g.over || g.active === seat) break;
-    g.takeTurn(g.P(g.active), false);
-  }
-}
 // k playouts; playout i of every option uses the same shuffled libraries (same luck), so options are compared fairly
 function score(base, seat, play, k0 = 0, n = K) {
   let t = 0;
@@ -53,7 +45,7 @@ function score(base, seat, play, k0 = 0, n = K) {
     try {
       base._lookN = 1000 + k; const g = base.cloneForLook(), pp = g.players[seat];
       if (play(g, pp) === false) return -Infinity;
-      if (!g.over && !pp.lost) untilTurnOf(g, seat);
+      if (!g.over && !pp.lost) g.playToTurnOf(seat);
       const v = g.lookValue(g, seat); t += Math.abs(v) >= 1000 ? v : Math.max(-900, Math.min(900, v)); // a win or loss always outweighs a huge board
     } catch (e) { return -Infinity; }
   }

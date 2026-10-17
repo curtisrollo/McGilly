@@ -112,6 +112,36 @@ export default [
     },
   },
   {
+    card: 'Glacial Chasm', title: 'is played when the table could kill us next turn',
+    wrong: '(new behaviour) it was played like any land, or from the graveyard only under a fixed 15-life rule',
+    run({ table, card, put }) {
+      const [g, me, opp] = setup(table); me.life = 9; const ch = card(g, me, 'Glacial Chasm', 'hand'); card(g, me, 'Island', 'hand');
+      for (let i = 0; i < 3; i++) put(g, opp, 'Noxious Gearhulk');
+      g.playLand(me);
+      return { ok: ch.zone === 'bf', note: `Chasm in ${ch.zone}` };
+    },
+  },
+  {
+    card: 'Glacial Chasm', title: 'is not played when our own attack wins this turn',
+    wrong: 'it was played like any land, stopping the attack that would have knocked a player out',
+    run({ table, card, put }) {
+      const [g, me, opp] = setup(table); const ch = card(g, me, 'Glacial Chasm', 'hand'); card(g, me, 'Island', 'hand');
+      put(g, me, 'Old Gnawbone'); put(g, me, 'Noxious Gearhulk'); opp.life = 8;
+      g.playLand(me);
+      return { ok: ch.zone === 'hand', note: `Chasm in ${ch.zone}` };
+    },
+  },
+  {
+    card: 'Glacial Chasm', title: 'with a lethal board, lets Chasm go at upkeep instead of paying and being unable to attack (seed 41629257)',
+    wrong: 'the upkeep was paid whenever the life could be spared, so Muldrotha kept a land that stopped its own attacks with Kaalia at 8',
+    run({ table, put }) {
+      const [g, me, opp] = setup(table); const ch = put(g, me, 'Glacial Chasm'); ch.age = 1; me.life = 52;
+      put(g, me, 'Old Gnawbone'); put(g, me, 'Noxious Gearhulk'); opp.life = 8;
+      g.active = me.seat; g.takeTurn(me, false);
+      return { ok: ch.zone !== 'bf' && opp.lost, note: `Chasm in ${ch.zone}; opponent at ${opp.life}${opp.lost ? ' (out)' : ''}` };
+    },
+  },
+  {
     card: 'Cyclonic Rift', title: 'is not spent on turn 3 to bounce a 1-mana Giver of Runes; it waits for overload',
     wrong: 'a bounce was scored like destroying the target, so Rift went on a creature its owner recast next turn for one mana',
     run({ table, card, put }) {
