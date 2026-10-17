@@ -4179,7 +4179,16 @@
       const opps = g.opps(p);
       let v = (g.players.length - 1 - opps.length) * 60 + opps.reduce((a, q) => a + Math.min(40, 40 - q.life) * 0.5 + q.poison * 3 - g.playerThreat(q) * 0.35, 0); // their boards count too: an edict on every opponent is worth a lot
       v += g.playerThreat(p) * 0.6 + p.hand.length * 1.5 + (p.infMana ? 25 : 0) + (opps.length && g.locked(opps[0]) ? 60 : 0) - (g.locked(p) ? 60 : 0) + Math.min(p.life, 40) * (!g.looseSeats || g.looseSeats.includes(seat) ? 0.4 : 0.2); // (life was 0.2 a point: 10 life = one 3/3; the A/B seat gets 0.4)
-      if (g.nnOn(p)) v += 80 * g.nnV(p);
+      // mana to come: ramp pays off after the look-ahead's horizon, so the mana we'll have counts (most early on)
+      v += g.sources(p).reduce((a, x) => a + Math.max(...x.opts.map((o) => o.amount)), 0) * Math.max(0.3, 2.5 - g.round * 0.15);
+      // The network judges positions better than these hand weights at every stage of the game (it picked the
+      // eventual winner 46% of the time vs 41%, and 34% vs 26% in the first four rounds), so when it is on it carries
+      // the score: its win chance, plus a quarter of the hand weights as a tie-breaker. (A/B seats only, for now.)
+      if (g.nnOn(p)) {
+        const knock = (g.players.length - 1 - opps.length) * 60;
+        if (!g.looseSeats || g.looseSeats.includes(seat)) return knock + 300 * g.nnV(p) + 0.25 * (v - knock);
+        v += 80 * g.nnV(p);
+      }
       return v;
     }
     // Try each candidate play on a copy, finish the main phase greedily, and compare. Returns the better pick, or null to keep the greedy one.
