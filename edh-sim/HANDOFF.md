@@ -14,7 +14,7 @@ a heuristic AI steered by a small neural network, and a single-page web app publ
 - `explain.mjs "Card"`: Oracle text next to what the engine extracted.
 
 ## Checks (run before every commit)
-- `node validate.mjs | tail -1`: must say 0 failed (659 checks as of this writing).
+- `node validate.mjs | tail -1`: must say 0 failed (660 checks as of this writing).
 - `NOLOOK=1 node invariants.mjs 150`: plays games and flags illegal states; must say "No problems found".
 - New bug: write the scenario first, confirm it fails on the old engine, then fix.
 

@@ -1,6 +1,17 @@
 // Scenarios for the Beledros deck. Same shape as ../scenarios.mjs.
 export default [
   {
+    card: 'Razaketh, the Foulblooded', title: 'before combat, Pests that can attack are not sacrificed yet (seed 555599590)',
+    wrong: 'pumped 11/11 Pests were sacrificed to tutor before combat instead of attacking first and going after combat',
+    run({ table, put }) {
+      const g = table(11, 1); const me = g.players[0]; me.hand = []; put(g, me, 'Razaketh, the Foulblooded');
+      g.addToken(me, { p: 1, t: 1, sub: 'Pest', colors: 'black green' }, 2, true); for (const c of me.bf) c.sick = false;
+      g.active = me.seat; g.mainPhase(me, false);
+      const pests = me.bf.filter((c) => c.token && /Pest/.test(c.info.name)).length;
+      return { ok: pests === 2, note: `${pests} of 2 Pests left before combat` };
+    },
+  },
+  {
     card: 'Hour of Promise', title: 'fetches Cabal Coffers together with Urborg, not Coffers alone',
     wrong: 'the two lands were picked one at a time, so Coffers could come without the Urborg that makes it work',
     run({ table, card }) {

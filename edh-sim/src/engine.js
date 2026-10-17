@@ -4195,6 +4195,7 @@
         if (!pick) { if (this.beledrosUntap(p)) continue; break; }
         if (pick.ab) { used.add(pick.ab.key); this.doActivate(p, pick.ab); continue; }
         const o = pick.o;
+        if (o.c.info.cost.x && this.beledrosXWorth(p, o)) this.beledrosForX(p);
         if (!this.castSpell(p, o.c, o.from, o.gyType)) break;
         this.playLand(p);
       }
@@ -4400,7 +4401,9 @@
         if (fodder.length < ab.sacArtifact || fodder.some((x) => this.permValue(x) > 8)) return null;
       }
       if (ab.sacCreature) {
-        fodder = this.sacFodder(p, c).filter((x) => !ab.sacColor || x.info.colors.has(ab.sacColor)).slice(0, ab.sacCreature);
+        // before combat on our turn, creatures that could attack aren't sacrificed yet: they swing first, and go after combat
+        const preCombat = postCombat === false && this.active === p.seat && !ab.preCombat;
+        fodder = this.sacFodder(p, c).filter((x) => (!ab.sacColor || x.info.colors.has(ab.sacColor)) && !(preCombat && this.canAttack(x) && this.power(x) > 0)).slice(0, ab.sacCreature);
         if (fodder.length < ab.sacCreature) return null;
       }
       if (ab.sacArtifactN && !ab.sacArtifact) {
@@ -4621,6 +4624,38 @@
       for (const c of tappedLands) c.tapped = false;
       return true;
     }
+    // Is the Beledros mana trick worth it for this X spell, or is the untap better saved (a combo piece to cast later
+    // this turn)? Played out both ways to the end of the turn.
+    beledrosXWorth(p, o) {
+      const bel = p.bf.find((c) => c.info.beledros);
+      if (!bel || bel.usedTurn === this.turn || !this.canPayLife(p, 10)) return false;
+      if (!this.lookahead || this._inLook) return true;
+      const val = (trick) => {
+        try {
+          this._lookN = (this._lookN || 0) + 1;
+          const g = this.cloneForLook(), pp = g.players[p.seat], c = g.cards[o.c.id];
+          if (trick) g.beledrosForX(pp);
+          if (g.over || pp.lost || !g.castSpell(pp, c, o.from, o.gyType)) return -Infinity;
+          g.restOfTurn(pp, this.phase === 'main 2' ? 'main 2' : 'main');
+          return g.lookValue(g, p.seat);
+        } catch (e) { return -Infinity; }
+      };
+      return val(true) > val(false) + 2;
+    }
+    // Beledros with an X spell: tap every land for mana, pay 10 life to untap them all, and cast with the lands again
+    // (about twice the X: a Finale of Devastation for 20 instead of 10)
+    beledrosForX(p) {
+      const bel = p.bf.find((c) => c.info.beledros);
+      if (!bel || bel.usedTurn === this.turn || !this.canPayLife(p, 10) || this.locked(p)) return false;
+      const lands = this.sources(p).filter((s2) => s2.c.info.isLand && !s2.c.tapped && !s2.fodder && !s2.counters);
+      if (lands.length < 4) return false;
+      let n = 0;
+      for (const s2 of lands) { const o = s2.opts.reduce((a, b) => (b.amount > a.amount ? b : a)); this.addFloating(p, o.colors.length === 1 ? o.colors[0] : (o.colors.find((c2) => c2 !== 'C') || 'C'), o.amount); n += o.amount; }
+      bel.usedTurn = this.turn;
+      this.emit('ability', `${p.name} taps ${lands.length} lands for ${n} mana, pays 10 life and Beledros untaps them: more mana for the X spell.`, { seat: p.seat, cards: [bel.id] });
+      this.loseLife(p, 10); this.checkState();
+      return !this.over && !p.lost;
+    }
     // Post-combat uses of leftover resources
     lateGameMana(p) {
       if (this.over || p.lost) return;
@@ -4806,15 +4841,34 @@
 
     // Split attacks: the attackers a second player can't block at all, sent at that player when they are enough to
     // knock them out and the main target isn't dying to the full attack anyway. (The look-ahead tries wider splits.)
+    // Kill-split: going round the other players from the lowest life, each gets just enough attackers to die through
+    // their possible blocks (they block the biggest attackers they can); the rest stay on the main target, which keeps
+    // enough to die too when it was dying to the whole attack.
     splitAttack(p, q, attackers, lethalish) {
-      if (lethalish || attackers.length < 2) return null;
+      if (attackers.length < 2) return null;
+      const left = attackers.slice(), sides = [];
+      const through = (r, set) => {
+        const bl = r.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b));
+        const used = new Set(); let dmg = 0;
+        for (const a of set.slice().sort((x, y) => this.power(y) - this.power(x))) {
+          const b = bl.find((x) => !used.has(x) && this.canBlock(x, a) && !(this.hasKw(a, 'menace')));
+          if (b) { used.add(b); if (this.hasKw(a, 'trample')) dmg += Math.max(0, this.power(a) - this.toughness(b)); }
+          else dmg += this.scaleDamage(p.seat, r.seat, this.power(a));
+        }
+        return dmg;
+      };
+      const qNeeds = lethalish ? q.life : 0;
       for (const r of this.splitTargets(p, q).sort((a, b) => a.life - b.life)) {
         const pick = [];
-        let dmg = 0;
-        for (const a of this.freeAgainst(r, attackers).sort((x, y) => this.power(y) - this.power(x))) { if (dmg >= r.life) break; pick.push(a); dmg += this.scaleDamage(p.seat, r.seat, this.power(a)); }
-        if (dmg >= r.life && pick.length < attackers.length) return { q: r, list: pick };
+        for (const a of left.slice().sort((x, y) => this.power(x) - this.power(y))) { if (through(r, pick) >= r.life) break; pick.push(a); }
+        if (through(r, pick) < r.life) { // smallest-first wasn't enough: try biggest-first
+          pick.length = 0;
+          for (const a of left.slice().sort((x, y) => this.power(y) - this.power(x))) { if (through(r, pick) >= r.life) break; pick.push(a); }
+        }
+        const rest = left.filter((a) => !pick.includes(a));
+        if (through(r, pick) >= r.life && rest.length && (!qNeeds || through(q, rest) >= qNeeds)) { sides.push({ q: r, list: pick }); left.splice(0, left.length, ...rest); }
       }
-      return null;
+      return sides.length ? sides : null;
     }
     splitTargets(p, q) { return this.opps(p).filter((r) => r !== q && r.protectedUntil < this.turn && !this.has(r, 'chasm') && !this.has(r, 'emissary') && !this.has(r, 'sphere')); }
     // attackers r has no untapped creature to block (flying over ground blockers, menace into one blocker, unblockable)
@@ -4922,7 +4976,7 @@
       }
       // Look-ahead on the attack: when a creature could die to a block, play the combat out on copies of the game (the
       // defender blocks with its own logic) with and without each risky attacker, and with no attack, and keep the best.
-      if (this._forcedAtk) attackers.splice(0, attackers.length, ...this._forcedAtk.ids.concat(this._forcedAtk.side ? this._forcedAtk.side.ids : []).map((id) => this.cards[id]).filter((c) => c && c.zone === 'bf' && this.canAttack(c)));
+      if (this._forcedAtk) attackers.splice(0, attackers.length, ...this._forcedAtk.ids.concat(this._forcedAtk.side ? [].concat(this._forcedAtk.side).flatMap((sd) => sd.ids) : []).map((id) => this.cards[id]).filter((c) => c && c.zone === 'bf' && this.canAttack(c)));
       else if (this.lookahead && !this._inLook && !this._forceAttack && attackers.length && this.looseLook !== false && (!this.looseSeats || this.looseSeats.includes(p.seat)) && (!this.lookSeats || this.lookSeats.includes(p.seat))) {
         const killedBy = (a) => blockers.some((b) => this.canBlock(b, a) && ((this.power(b) >= this.toughness(a) - a.dmg) || (this.hasKw(b, 'deathtouch') && this.power(b) > 0)) && !this.hasKw(a, 'indestructible'));
         const risky = attackers.filter(killedBy).sort((x, y) => this.creatureValue(y) - this.creatureValue(x)).slice(0, 3);
@@ -4934,8 +4988,11 @@
           const P = (main, side = null) => Object.assign(main, { side });
           const plans = [P(attackers.slice()), ...risky.map((r) => P(attackers.filter((a) => a !== r))), P([])];
           if (held.length) { plans.push(P(attackers.concat(held))); for (const h of held.slice(0, 2)) plans.push(P(attackers.concat(h))); }
-          const sp = this.splitAttack(p, q, attackers, false);
-          if (sp) plans.push(P(attackers.filter((a) => !sp.list.includes(a)), { q: sp.q.seat, ids: sp.list.map((a) => a.id) }));
+          // splits: the kill-split with what attacks now, and with every creature that can attack
+          for (const pool of held.length ? [attackers, attackers.concat(held)] : [attackers]) {
+            const sp = this.splitAttack(p, q, pool, false);
+            if (sp) { const used = new Set(sp.flatMap((sd) => sd.list)); plans.push(P(pool.filter((a) => !used.has(a)), sp.map((sd) => ({ q: sd.q.seat, ids: sd.list.map((a) => a.id) })))); }
+          }
           for (const r of others.slice(0, 2)) { const f = this.freeAgainst(r, attackers.concat(held)); if (f.length) plans.push(P(attackers.concat(held).filter((a) => !f.includes(a)), { q: r.seat, ids: f.map((a) => a.id) })); }
           const res = plans.map((plan) => {
             try {
@@ -4948,7 +5005,7 @@
           let bi = 0; for (let i = 1; i < res.length; i++) if (res[i] > res[bi]) bi = i;
           if (!(bi > 0 && res[bi] > res[0] + 4)) bi = 0;
           // whatever plan wins is what happens (the kept plan included: no split it wasn't judged with)
-          const pl = plans[bi], sideIds = new Set(pl.side ? pl.side.ids : []);
+          const pl = plans[bi], sideIds = new Set(pl.side ? [].concat(pl.side).flatMap((sd) => sd.ids) : []);
           attackers.splice(0, attackers.length, ...pl, ...p.bf.filter((c) => sideIds.has(c.id) && !pl.includes(c))); this._planAtk = { side: pl.side };
           if (!attackers.length) return;
         }
@@ -4987,11 +5044,11 @@
         }
       }
       // split attacks: some attackers go at a second player (the look-ahead's plan, or splitAttack's pick)
-      let side = null;
+      let sides = [];
       const plan = this._forcedAtk || this._planAtk; this._planAtk = null;
-      if (plan && plan.side) { const r = this.P(plan.side.q), ids = new Set(plan.side.ids), list = attackers.filter((a) => ids.has(a.id)); if (!r.lost && r !== q && list.length) side = { q: r, list }; }
-      else if (!plan && !this._newTargetOnly) side = this.splitAttack(p, q, attackers, lethalish);
-      const sideSet = new Set(side ? side.list : []);
+      if (plan && plan.side) for (const sd of [].concat(plan.side)) { const r = this.P(sd.q), ids = new Set(sd.ids), list = attackers.filter((a) => ids.has(a.id)); if (!r.lost && r !== q && list.length) sides.push({ q: r, list }); }
+      else if (!plan && !this._newTargetOnly) sides = this.splitAttack(p, q, attackers, lethalish) || [];
+      const sideSet = new Set(sides.flatMap((sd) => sd.list));
       for (const a of sideSet) assign.delete(a.id);
       for (const a of attackers) { if (!this.hasKw(a, 'vigilance')) a.tapped = true; a.attacking = true; }
       p.attackersTurn = this.turn; p.attackersCount = (p.attackersTurn === this.turn ? p.attackersCount || 0 : 0) + attackers.length;
@@ -5001,9 +5058,9 @@
       };
       const mainA = attackers.filter((a) => !sideSet.has(a));
       const atkInfo = mainA.map((a) => ({ id: a.id, to: assign.get(a.id) || null }));
-      const sideInfo = side ? side.list.map((a) => ({ id: a.id, to: null })) : null;
+      for (const sd of sides) sd.info = sd.list.map((a) => ({ id: a.id, to: null }));
       if (mainA.length) announce(q, mainA, atkInfo);
-      if (side) { announce(side.q, side.list, sideInfo); p.attackedThisTurn.push(side.q.seat); }
+      for (const sd of sides) { announce(sd.q, sd.list, sd.info); p.attackedThisTurn.push(sd.q.seat); }
       // Alibou: artifact creatures attacking
       if (attackers.some((a) => a.info.types.has('Artifact'))) for (const src of p.bf) if (src.info.triggers.some((t) => t.k === 'alibou')) {
         const x = p.bf.filter((c) => c.info.types.has('Artifact') && c.tapped).length;
@@ -5126,7 +5183,7 @@
         this.emit('damage', `Combat damage: ${dealtToPlayer} to ${q.name}.${lostTxt}`, { seat: p.seat, attackers: atkInfo.filter((x) => this.cards[x.id].zone === 'bf'), blockers: blkInfo.filter((x) => this.cards[x.id].zone === 'bf'), target: q.seat });
       };
       fight(q, all.filter((a) => !sideSet.has(a)), atkInfo);
-      if (side) fight(side.q, side.list.filter((a) => a.zone === 'bf'), sideInfo);
+      for (const sd of sides) fight(sd.q, sd.list.filter((a) => a.zone === 'bf'), sd.info);
       for (const a of all) a.attacking = false;
       // additional combat phases, one per trigger that granted one (capped so a loop can't run forever)
       const queued = this._extraCombats || []; this._extraCombats = [];
