@@ -4517,7 +4517,11 @@
         }
         else if (f.k === 'removal' || f.k === 'steal') s += 12;
         else if (f.k === 'tokens') s += 5 + this.fxNum(p, f.n, 3) * 2;
-        else if (f.k === 'damage' || f.k === 'drain' || f.k === 'drainOne') s += 5;
+        else if (f.k === 'damage' || f.k === 'drain' || f.k === 'drainOne') {
+          // scored by what it does: knocking a player out is a step toward winning (Aetherflux Reservoir for 50)
+          const amt = this.fxNum(p, f.n, 1), kills = this.opps(p).some((q) => q.protectedUntil < this.turn && this.scaleDamage(p.seat, q.seat, amt) >= q.life);
+          s += kills ? 80 : 5 + Math.min(amt, 10) * 0.5;
+        }
         else if (f.k === 'discard') {
           s += 4;
           // the Myrkul loop empties every opponent's hand
@@ -4534,7 +4538,7 @@
       for (const x of fodder) s -= x.token ? 1 : Math.max(0, this.creatureValue(x) * 0.6 - (myrkul ? this.myrkulGain(x) : 0));
       // Dictate of Erebos / Grave Pact: every creature of ours that dies takes one from each opponent who has one
       s += fodder.filter((x) => x.info.isCreature).length * this.edictsPerDeath(p) * 7;
-      s -= (ab.life || 0) * 0.4 + (cost.mv || 0) * 0.5 + (ab.discard || 0) * 3;
+      s -= (ab.life || 0) * 0.4 * Math.min(1, 40 / Math.max(40, p.life)) + (cost.mv || 0) * 0.5 + (ab.discard || 0) * 3; // (50 life matters at 60 life, not at 900)
       // sacrificing the card itself costs what it's worth on the battlefield (a mana rock early on is worth a lot)
       if (ab.sac) s -= Math.max(3, this.permValue(c)) + (c.info.mana ? Math.max(0, 14 - this.round) : 0);
       // never into an empty library: the ability's draws plus what the sacrificed creatures draw on the way out

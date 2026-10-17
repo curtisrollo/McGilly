@@ -3,6 +3,15 @@ const OSG = 6; // decks/ index of osgir.txt: table(11, OSG) seats the Osgir deck
 const libClear = (p) => { for (const c of p.library) c.zone = 'exile'; p.library = []; };
 export default [
   {
+    card: 'Aetherflux Reservoir', title: 'at 898 life, pays 50 to shoot a player on 23 (mistake-finder, seed 100072)',
+    wrong: 'damage abilities scored a flat +5 and 50 life cost -20 whatever the life total, so it was never used',
+    run({ table, put }) {
+      const g = table(11, 6); g.lookahead = false; const [me, opp] = g.players; me.life = 898; opp.life = 23; me.hand = []; put(g, me, 'Aetherflux Reservoir'); // the rules alone (the look-ahead was off for a player who had gone infinite)
+      g.mainPhase(me, true);
+      return { ok: opp.lost, note: `opponent at ${opp.life}${opp.lost ? ' (out)' : ''}, our life ${me.life}` };
+    },
+  },
+  {
     card: 'Quicksmith Genius', title: 'each Osgir token copy entering is an artifact entering, so it loots twice',
     wrong: 'Osgir\'s copies were made without entering the battlefield, so nothing that watches artifacts entering saw them',
     run({ table, put, card }) {
