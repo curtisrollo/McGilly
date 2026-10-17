@@ -112,6 +112,17 @@ export default [
     },
   },
   {
+    card: 'Sakura-Tribe Elder', title: 'is sacrificed for its land in response when a wipe would kill it (seed 405896681)',
+    wrong: 'The Meathook Massacre (-5/-5) killed it and the land was never fetched',
+    run({ table, put }) {
+      const [g, me, opp] = setup(table); const e = put(g, me, 'Sakura-Tribe Elder'); const l0 = me.bf.filter((c) => c.info.isLand).length;
+      g.resolveEffect(opp, { k: 'wipe', what: 'creatures', shrink: 5 }, null, 0, true); g.checkState();
+      e.zone === 'bf' && g.destroy(e); // (whichever way the wipe is modelled, it dies)
+      const l1 = me.bf.filter((c) => c.info.isLand).length;
+      return { ok: e.zone !== 'bf' && l1 === l0 + 1, note: `Elder in ${e.zone}; lands ${l0} -> ${l1}` };
+    },
+  },
+  {
     card: 'Sakura-Tribe Elder', title: 'ramp line: Elder turn 2, Cultivate turn 3, Muldrotha on turn 4',
     wrong: '(new) the opening that gets Muldrotha out two turns early',
     run({ table, card, put }) {

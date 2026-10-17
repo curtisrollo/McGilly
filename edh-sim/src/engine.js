@@ -1324,6 +1324,17 @@
       if (c.zone !== 'bf') return false;
       if (!force && this.hasKw(c, 'indestructible')) return false;
       const ctrl = this.P(c.ctrl);
+      // about to die anyway (removal, a wipe, -X/-X, lethal damage): a creature whose own sacrifice gets something
+      // (Sakura-Tribe Elder's land) is sacrificed in response, so the value isn't lost
+      if (why !== 'sacrificed' && !this._sacInResponse && !ctrl.lost) {
+        const ab = this.selfSacAb(c);
+        if (ab && !this.locked(ctrl) && !this.abolished(ctrl, 'ability')) {
+          this._sacInResponse = true;
+          this.emit('response', `${ctrl.name} sacrifices ${c.info.name} in response.`, { seat: ctrl.seat, cards: [c.id] });
+          try { this.doActivate(ctrl, { c, ab, fodder: [], cost: ab.cost }); } finally { this._sacInResponse = false; }
+          if (c.zone !== 'bf') return true;
+        }
+      }
       const wasCreature = c.info.isCreature;
       const undying = this.hasKw(c, 'undying') && c.p1 === 0 && !c.token;
       const persist = this.hasKw(c, 'persist') && c.p1 >= 0 && !c.token && !undying;
