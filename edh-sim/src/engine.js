@@ -3868,8 +3868,9 @@
       this.deathsThisTurn = 0;
       if (p.protectedUntil < this.turn) p.protectedUntil = -1;
       // phased-out permanents return
-      if (p.phased && p.phased.length) { for (const c of p.phased) { c.zone = 'bf'; this.P(c.ctrl).bf.push(c); } this.emit('effect', `${p.phased.length} permanent${p.phased.length > 1 ? 's' : ''} phase back in for ${p.name}.`, { seat: p.seat }); p.phased = []; }
+      if (p.phased && p.phased.length) { this._phasedIn = true; for (const c of p.phased) { c.zone = 'bf'; this.P(c.ctrl).bf.push(c); } this.emit('effect', `${p.phased.length} permanent${p.phased.length > 1 ? 's' : ''} phase back in for ${p.name}.`, { seat: p.seat }); p.phased = []; }
       for (const q of this.players) for (const c of q.bf) if (c.phasedOwnerTurn === p.seat) { c.phasedOwnerTurn = null; }
+      if (this._phasedIn) { this._phasedIn = false; this.checkState(); } // what phased back in is checked at once (a 0/0 token dies)
       for (const c of p.bf) {
         if (!c.info.noUntap && !(c.frozenUntil && c.frozenUntil > this.turn)) c.tapped = false;
         c.sick = false;
