@@ -2167,8 +2167,11 @@
           if (fx.fromHand) {
             const l = p.hand.find((c) => c.info.isLand); if (l) { this.removeFrom(p.hand, l); this.enterBattlefield(l, p, { quiet: true }); got++; toBf.push(l); }
           } else {
-            for (let i = 0; i < fx.bf && lands.length; i++) { const l = this.bestLandFrom(p, lands); this.removeFrom(lands, l); this.removeFrom(p.library, l); this.enterBattlefield(l, p, { tapped: fx.tapped, quiet: true }); got++; toBf.push(l); }
-            for (let i = 0; i < fx.hand && lands.length; i++) { const l = this.bestLandFrom(p, lands); this.removeFrom(lands, l); this.removeFrom(p.library, l); l.zone = 'hand'; p.hand.push(l); toHand.push(l); }
+            // two picks are chosen together (the first goes to the battlefield, any second to where the spell says)
+            const pair = fx.bf + fx.hand === 2 ? this.bestLandPair(p, lands) : null;
+            for (let i = 0; i < fx.bf && lands.length; i++) { const l = pair && pair[i] ? pair[i] : this.bestLandFrom(p, lands); this.removeFrom(lands, l); this.removeFrom(p.library, l); this.enterBattlefield(l, p, { tapped: fx.tapped, quiet: true }); got++; toBf.push(l); }
+            if (pair && fx.hand && pair[fx.bf] && lands.includes(pair[fx.bf])) { const l = pair[fx.bf]; this.removeFrom(lands, l); this.removeFrom(p.library, l); l.zone = 'hand'; p.hand.push(l); toHand.push(l); }
+            for (let i = toHand.length; i < fx.hand && lands.length; i++) { const l = this.bestLandFrom(p, lands); this.removeFrom(lands, l); this.removeFrom(p.library, l); l.zone = 'hand'; p.hand.push(l); toHand.push(l); }
             this.R.shuffle(p.library);
           }
           if (!quiet) this.emit('ramp', `${name}: ${p.name} ${toBf.length ? `puts ${this.listNames(toBf.map((c) => c.info.name))} onto the battlefield${fx.tapped ? ' tapped' : ''}` : ''}${toBf.length && toHand.length ? ' and ' : ''}${toHand.length ? `puts ${this.listNames(toHand.map((c) => c.info.name))} into their hand` : ''}${!toBf.length && !toHand.length ? 'finds no land' : ''}.`, { seat: p.seat, cards: (src ? [src.id] : []).concat(toBf.map((c) => c.id)) });
@@ -3215,6 +3218,24 @@
     // worth paying life for an untapped land only if something castable now needs the mana
     wantUntappedLand(p, c) { if (!this.started || p.seat !== this.active) return false; c.tapped = false; const now = this.castOptions(p).length; c.tapped = true; const before = this.castOptions(p).length; c.tapped = false; return now > before; }
     bestLandFrom(p, lands) { return lands.slice().sort((a, b) => this.landValue(p, b) - this.landValue(p, a))[0]; }
+    // A search for two lands picks them together: every pair, each valued with the other already out, so a pair
+    // that works together (Cabal Coffers + Urborg) beats two lands that are each a little better on their own.
+    bestLandPair(p, lands) {
+      if (lands.length < 2) return lands.slice(0, 1);
+      const with_ = (a, b) => { p.bf.push(a); const v = this.landValue(p, b); p.bf.pop(); return v; };
+      const top = lands.slice().sort((a, b) => this.landValue(p, b) - this.landValue(p, a));
+      // distinct names only (ten basic Swamps are one choice), plus the partners synergy can pull in from further down
+      const seen = new Set(), pool = top.filter((c) => !seen.has(c.info.name) && seen.add(c.info.name)).slice(0, 25);
+      let best = null, bv = -Infinity;
+      for (let i = 0; i < pool.length; i++) for (let j = 0; j < pool.length; j++) if (i !== j) {
+        const v = this.landValue(p, pool[i]) + with_(pool[i], pool[j]);
+        if (v > bv) { bv = v; best = [pool[i], pool[j]]; }
+      }
+      // two of the same name (two basics): allowed when the library has two
+      const dup = top.find((c, k) => top.findIndex((x) => x.info.name === c.info.name) !== k);
+      if (dup) { const a = top.find((x) => x.info.name === dup.info.name), v = this.landValue(p, a) + with_(a, dup); if (v > bv) best = [a, dup]; }
+      return best;
+    }
     cardValue(p, c) {
       const i = c.info;
       if (i.isLand) return 1 + this.landSynergy(p, c);

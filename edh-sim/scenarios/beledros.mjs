@@ -1,6 +1,18 @@
 // Scenarios for the Beledros deck. Same shape as ../scenarios.mjs.
 export default [
   {
+    card: 'Hour of Promise', title: 'fetches Cabal Coffers together with Urborg, not Coffers alone',
+    wrong: 'the two lands were picked one at a time, so Coffers could come without the Urborg that makes it work',
+    run({ table, card }) {
+      const g = table(11, 1); const me = g.players[0]; const h = card(g, me, 'Hour of Promise', 'hand');
+      const before = new Set(me.bf.map((c) => c.id));
+      g.resolveEffects(me, h.info.spell, h, null, true);
+      const got = me.bf.filter((c) => !before.has(c.id)).map((c) => c.info.name);
+      const pair = got.includes('Cabal Coffers') && got.includes('Urborg, Tomb of Yawgmoth');
+      return { ok: pair || !got.includes('Cabal Coffers'), note: `fetched: ${got.join(', ')}` };
+    },
+  },
+  {
     card: 'Beledros Witherbloom', title: 'tapped out with a big spell in hand at 40 life: pays 10 life, untaps the lands and casts it',
     wrong: 'he only considered it after combat with a strict score bar, so he sat on 9 tapped lands with Avenger of Zendikar in hand',
     run({ table, put, card }) {
