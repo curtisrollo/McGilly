@@ -4178,7 +4178,7 @@
       if (p.lost || (g.over && g.winner !== seat)) return -1000;
       const opps = g.opps(p);
       let v = (g.players.length - 1 - opps.length) * 60 + opps.reduce((a, q) => a + Math.min(40, 40 - q.life) * 0.5 + q.poison * 3 - g.playerThreat(q) * 0.35, 0); // their boards count too: an edict on every opponent is worth a lot
-      v += g.playerThreat(p) * 0.6 + p.hand.length * 1.5 + (p.infMana ? 25 : 0) + (opps.length && g.locked(opps[0]) ? 60 : 0) - (g.locked(p) ? 60 : 0) + Math.min(p.life, 40) * 0.2;
+      v += g.playerThreat(p) * 0.6 + p.hand.length * 1.5 + (p.infMana ? 25 : 0) + (opps.length && g.locked(opps[0]) ? 60 : 0) - (g.locked(p) ? 60 : 0) + Math.min(p.life, 40) * (!g.looseSeats || g.looseSeats.includes(seat) ? 0.4 : 0.2); // (life was 0.2 a point: 10 life = one 3/3; the A/B seat gets 0.4)
       if (g.nnOn(p)) v += 80 * g.nnV(p);
       return v;
     }
@@ -4948,6 +4948,9 @@
       if (p.lost || this.over) return;
       let cands = p.bf.filter((c) => this.canAttack(c));
       if (!cands.length) return;
+      // a copy from before the attack, for the defenders' block decisions (see chooseBlocks)
+      this._preCombat = null;
+      if (this.lookahead && !this._inLook && !this._forcedAtk) { const n0 = this._lookN; this._preCombat = { g: this.cloneForLook(), p: p.seat }; this._lookN = n0; }
       const q = this._forcedAtk ? this.P(this._forcedAtk.q) : this.chooseDefender(p, cands);
       if (!q) return;
       const blockers = q.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b));
@@ -5128,6 +5131,7 @@
       const atkInfo = mainA.map((a) => ({ id: a.id, to: assign.get(a.id) || null }));
       for (const sd of sides) sd.info = sd.list.map((a) => ({ id: a.id, to: null }));
       if (mainA.length) announce(q, mainA, atkInfo);
+      if (this._preCombat) this._preCombat.plan = { q: q.seat, ids: mainA.map((a) => a.id), side: sides.map((sd) => ({ q: sd.q.seat, ids: sd.list.map((a) => a.id) })) };
       for (const sd of sides) { announce(sd.q, sd.list, sd.info); p.attackedThisTurn.push(sd.q.seat); }
       // Alibou: artifact creatures attacking
       if (attackers.some((a) => a.info.types.has('Artifact'))) for (const src of p.bf) if (src.info.triggers.some((t) => t.k === 'alibou')) {
@@ -5159,7 +5163,7 @@
         if (q.lost || this.over || !attackers.length) return;
         this.flashEmperor(q, attackers);
         // blocks
-        const blocks = this.declareBlocks(q, attackers.filter((a) => a.zone === 'bf' && !assign.get(a.id)), p);
+        const blocks = this.chooseBlocks(q, attackers.filter((a) => a.zone === 'bf' && !assign.get(a.id)), p);
         // creatures left over step in front of attackers sent at a planeswalker: a block that survives, or a chump when the walker would die
         for (const a of attackers.filter((x) => x.zone === 'bf' && assign.get(x.id) && !this.hasKw(x, 'menace')).sort((x, y) => this.power(y) - this.power(x))) {
           const w = this.cards[assign.get(a.id)], [ap, at] = this.pt(a), ak = this.kws(a), busy = new Set([...blocks.values()].flat());
@@ -5311,8 +5315,65 @@
       for (const eq of p.bf) if (eq.attached === a.id && eq.info.combatDmg.length) this.resolveEffects(p, eq.info.combatDmg, eq, null, true);
     }
 
+    // Decision fork: try each option on a copy of the game, play on to `seat`'s next turn, and score the board from
+    // `seat`'s view (lookValue, the network's win chance included). Returns the best option's index, or 0 (the
+    // rules' own choice) unless another is clearly better. setup(g, option) applies the option to the copy and plays it.
+    // Every option's copy gets the same shuffles (same luck), so options are compared fairly. toNextTurn: play on to
+    // seat's next turn; otherwise stop when setup returns (the end of the current turn, for blocks: less noise).
+    decide(seat, base, options, setup, margin = 4, toNextTurn = false) {
+      const n0 = base._lookN || 0;
+      const res = options.map((o) => {
+        try {
+          base._lookN = n0; const g = base.cloneForLook();
+          setup(g, o);
+          if (toNextTurn && !g.over && !g.players[seat].lost) g.playToTurnOf(seat);
+          return g.lookValue(g, seat);
+        } catch (e) { return -Infinity; }
+      });
+      let bi = 0; for (let i = 1; i < res.length; i++) if (res[i] > res[bi]) bi = i;
+      return bi > 0 && res[bi] > res[0] + margin ? bi : 0;
+    }
+    // Blocks: the rules' plan, no blocks, the plan without each of its blocks, and the plan plus a block on each
+    // unblocked attacker, each played out from before the attack (same attack, these blocks) and judged by decide().
+    chooseBlocks(q, attackers, p) {
+      const base = this.declareBlocks(q, attackers, p);
+      const pre = this._preCombat;
+      if (!pre || !pre.plan || pre.p !== p.seat || this._inLook || this.looseLook === false || (this.looseSeats && !this.looseSeats.includes(q.seat))) return base;
+      const avail = q.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b));
+      if (!avail.length || !attackers.some((a) => avail.some((b) => this.canBlock(b, a)))) return base;
+      const plans = [base, new Map()];
+      for (const [aid] of [...base].slice(0, 3)) { const m = new Map(base); m.delete(aid); plans.push(m); }
+      const used = new Set([...base.values()].flat());
+      for (const a of attackers.filter((x) => !base.has(x.id)).sort((x, y) => this.power(y) - this.power(x)).slice(0, 3)) {
+        const b = avail.filter((x) => !used.has(x) && this.canBlock(x, a) && !x.isCommander).sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0];
+        if (b && !(this.hasKw(a, 'menace'))) { const m = new Map(base); m.set(a.id, [b]); plans.push(m); }
+      }
+      // double blocks: two cheap blockers that together kill one of the biggest attackers
+      for (const a of attackers.slice().sort((x, y) => this.creatureValue(y) - this.creatureValue(x)).slice(0, 2)) {
+        if (this.hasKw(a, 'indestructible')) continue;
+        const free = avail.filter((x) => this.canBlock(x, a) && !x.isCommander && ![...base].some(([aid, bs]) => aid !== a.id && bs.includes(x))).sort((x, y) => this.creatureValue(x) - this.creatureValue(y));
+        for (let i = 0; i < free.length; i++) for (let j = i + 1; j < free.length; j++) {
+          if (this.power(free[i]) + this.power(free[j]) >= this.toughness(a) - a.dmg || this.hasKw(free[i], 'deathtouch') || this.hasKw(free[j], 'deathtouch')) { const m = new Map(base); m.set(a.id, [free[i], free[j]]); plans.push(m); i = j = free.length; }
+        }
+      }
+      const key = (m) => [...m].map(([a, bs]) => a + ':' + bs.map((b) => b.id).join('+')).sort().join(',');
+      const uniq = plans.filter((m, i) => plans.findIndex((x) => key(x) === key(m)) === i);
+      if (uniq.length < 2) return base;
+      const bi = this.decide(q.seat, pre.g, uniq, (g, m) => {
+        const pp = g.players[p.seat];
+        g._forcedAtk = pre.plan; g._forcedBlocks = { q: q.seat, ids: [...m].map(([a, bs]) => [a, bs.map((b) => b.id)]) };
+        g.phase = 'combat'; g.combat(pp); g._forcedAtk = null; g._forcedBlocks = null;
+        if (!g.over && !pp.lost && g.active === p.seat) { g.emptyPools(); g.restOfTurn(pp, 'main 2'); }
+      }, 2); // (end-of-turn play-outs with the same shuffles are steady: a small margin is enough)
+      return uniq[bi];
+    }
     declareBlocks(q, attackers, p) {
       const blocks = new Map();
+      // a copy playing out a block plan the defender's decision fork chose
+      if (this._forcedBlocks && this._forcedBlocks.q === q.seat) {
+        for (const [aid, bids] of this._forcedBlocks.ids) { const a = attackers.find((x) => x.id === aid); const bs = bids.map((id) => this.cards[id]).filter((b) => b && b.zone === 'bf' && !b.tapped && a && this.canBlock(b, a)); if (a && bs.length) blocks.set(aid, bs); }
+        return blocks;
+      }
       const avail = q.bf.filter((b) => b.info.isCreature && !b.tapped && !this.pacified(b));
       const incoming = attackers.reduce((s, a) => s + this.power(a), 0);
       let remaining = incoming;

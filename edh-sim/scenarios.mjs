@@ -10,6 +10,17 @@ import atraxa from './scenarios/atraxa.mjs';
 import beledros from './scenarios/beledros.mjs';
 const core = [
   {
+    card: 'Craterhoof Behemoth', title: 'blocks by playing plans out: two 3/3s double-block and kill an attacking 5/5',
+    wrong: 'blocks were fixed one-blocker rules (no double blocks except against menace), so the 5/5 walked through',
+    run({ table, put }) {
+      const g = table(); const [me, opp] = g.players; me.bf = me.bf.filter((c) => c.info.isLand); opp.bf = opp.bf.filter((c) => c.info.isLand);
+      for (let i = 0; i < 2; i++) g.addToken(me, { p: 3, t: 3, sub: 'Beast', colors: 'green' }, 1, true);
+      const h = put(g, opp, 'Craterhoof Behemoth'); h.sick = false;
+      g.chooseDefender = () => me; g.active = opp.seat; g.phase = 'combat'; g.combat(opp);
+      return { ok: h.zone !== 'bf', note: `Craterhoof in ${h.zone}; life ${me.life}; beasts left ${me.bf.filter((c) => c.token).length}` };
+    },
+  },
+  {
     card: "Serra's Emissary", title: 'a lock piece: with a big board, a tutor fetches removal that can hit it',
     wrong: 'tutors picked general value; nothing knew the Emissary (protection from creatures) was what stopped the attack',
     run({ table, put, card }) {
