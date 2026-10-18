@@ -70,7 +70,7 @@ for (let gi = 0; gi < N; gi++) {
       if (extra.seat != null && g.players[extra.seat] && g.players[extra.seat].lost && ['cast', 'attack', 'ability', 'land'].includes(kind)) flag('a player who lost keeps acting', `${g.players[extra.seat].name}: ${text.slice(0, 80)}`);
       if (kind === 'cast') {
         const c = g.cards[extra.cards && extra.cards[0]]; const p = g.players[extra.seat];
-        if (c && p && p.seat !== g.active && !c.info.isInstant && !c.info.kw.has('flash') && !/flash/i.test(c.info.text || '')) flag("sorcery-speed spell cast on another player's turn", `${p.name} casts ${c.info.name} on ${g.players[g.active].name}'s turn`);
+        if (c && p && p.seat !== g.active && !c.info.isInstant && !g._inMiracle && !c.info.kw.has('flash') && !/flash/i.test(c.info.text || '')) flag("sorcery-speed spell cast on another player's turn", `${p.name} casts ${c.info.name} on ${g.players[g.active].name}'s turn`);
         if (c && c.info.cost.x && /\(X=0\)/.test(text)) flag('X spell cast for X=0', text);
         if (c && c.info.cost.x && !/X=/.test(text) && !/command zone|graveyard/.test(text)) flag('X spell cast without saying X', text.slice(0, 80));
       }

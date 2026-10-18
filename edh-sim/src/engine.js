@@ -306,6 +306,7 @@
     else if (/prevent all damage that sources of the color of your choice would deal this turn/.test(l)) fx.push({ k: 'fog', color: true }); // (Prismatic Strands: the attack's colour)
     if (/^target player can't cast spells this turn/.test(l)) fx.push({ k: 'silence' }); // (Orim's Chant)
     if (/target player mills cards equal to cardname's power/.test(l)) fx.push({ k: 'millOpp', n: 'POWER' }); // (Veteran Ice Climber)
+    if (/^manifest dread/.test(l)) fx.push({ k: 'tokens', n: 1, p: 2, t: 2, sub: 'Manifest', colors: '' }); // (a face-down 2/2)
     if ((m = l.match(/^cardname deals (\d+) damage to target attacking or blocking creature/))) fx.push({ k: 'damage', n: +m[1], to: 'creature' }); // (Razorgrass Ambush: any creature here)
     if (/creatures you control gain flying and get \+x\/\+x until end of turn, where x is the number of creatures you control/.test(l)) fx.push({ k: 'overrun', p: 'X', t: 'X', kw: ['flying'] }); // (Moonshaker Cavalry)
     if ((m = l.match(/untap up to (one|two|three|\d+) lands/))) fx.push({ k: 'untapLandsUpTo', n: num(m[1]) }); // (Cloud of Faeries)
@@ -355,6 +356,9 @@
       if (low === 'overload') a.overload = parseCost(arg);
       if (low === 'dash') a.dash = parseCost(arg);
       if (low === 'delve') a.delve = true;
+      if (low === 'miracle' && arg) a.miracle = parseCost(arg);
+      if (low === 'gift' || /^gift/.test(low)) a.gift = true;
+      if (low === 'web-slinging' && arg) a.altCost = { kind: 'webSling', mana: arg.replace(/[{}]/g, ' ').trim().toUpperCase() };
       if (low === 'evolve') a.evolve = true;
       if (low === 'ward' && /^\d+$/.test(arg || '')) { a.wardMana = +arg; a.kw.add('ward'); }
       if (low === 'ravenous') { a.etbCounters = 'X'; a.ravenous = true; } // enters with X +1/+1 counters; X >= 5: draw a card
@@ -483,7 +487,6 @@
       if ((m = low.match(/^noncreature spells cost \{(\d+)\} more to cast/))) { a.statics.push({ k: 'taxNoncreature', n: +m[1] }); continue; } // (Thalia, for everyone)
       if ((m = low.match(/^cardname gets \+(\d+)\/\+0 for every (\w+) cards in your graveyard/))) { a.gyPower = { p: +m[1], per: num(m[2]) }; continue; } // (Dark Matter Manipulator)
       if (/^as an additional cost to cast cardname, exile (\w+) cards from your graveyard/.test(low)) { a.addCost = 'exileGy:' + num(low.match(/exile (\w+) cards/)[1]); continue; } // (Abhorrent Oculus)
-      if (/^at the beginning of each opponent's upkeep, manifest dread/.test(low)) { a.upkeep.push({ opp: true, fx: [{ k: 'tokens', n: 1, p: 2, t: 2, sub: 'Manifest', colors: '' }] }); continue; } // (a face-down 2/2)
       if (/^whenever one or more permanent cards are put into your graveyard from anywhere while cardname has a -1\/-1 counter on it, remove a -1\/-1 counter/.test(low)) { a.gyShrinkRemove = true; continue; } // (Moonshadow)
       if (/^whenever you cycle or discard another card, put a -1\/-1 counter on each creature your opponents control/.test(low)) { a.triggers.push({ k: 'discardShrink' }); continue; } // (Archfiend of Ifnir)
       if (/^activated abilities of artifacts your opponents control can't be activated/.test(low)) { a.statics.push({ k: 'karn' }); continue; }
@@ -605,7 +608,7 @@
     if (opts.length) a.mana = { opts, oneShot, dork: a.isCreature };
     if (a.isLand) a.unmodeled = a.unmodeled.filter((l) => !/enters tapped|you may pay [23] life|return a land you control to its owner.s hand|becomes tapped, it deals 1 damage/i.test(l));
     // lines whose keyword is implemented elsewhere (the keyword list / enterBattlefield)
-    const kwDone = [[a.delve, /^delve/i], [a.mobilize, /^mobilize/i], [a.ravenous, /^ravenous/i], [a.evolve, /^evolve/i], [a.etbMinus, /enters with (a|one|two|three|four|five|six|\w+) -1\/-1 counters? on it/i], [a.wardMana, /^(flying, )?ward \{\d+\}$/i]];
+    const kwDone = [[a.delve, /^delve/i], [a.mobilize, /^mobilize/i], [a.ravenous, /^ravenous/i], [a.evolve, /^evolve/i], [a.miracle, /^miracle/i], [a.spree, /^spree/i], [true, /^replicate \{/i], [a.altCost && a.altCost.kind === 'webSling', /^web-slinging/i], [a.gift, /^gift a card/i], [a.etbMinus, /enters with (a|one|two|three|four|five|six|\w+) -1\/-1 counters? on it/i], [a.wardMana, /^(flying, )?ward \{\d+\}$/i]];
     a.unmodeled = a.unmodeled.filter((l) => !kwDone.some(([on, re]) => on && re.test(l)));
     if (a.isLand) {
       const lo = otext.toLowerCase();
@@ -633,6 +636,14 @@
   // and `cover` marks which rules-text lines it accounts for (the audit uses this).
   const ALL = /./;
   const SCRIPTS = {
+    // spree: a base cost plus one or more modes, each with its own extra cost (see spreeModes)
+    'Insatiable Avarice': (a, cover) => { a.spree = [{ cost: parseCost('2'), fx: [{ k: 'tutor', what: 'card', top: true }] }, { cost: parseCost('B B'), fx: [{ k: 'draw', n: 3 }, { k: 'loseSelf', n: 3 }] }]; a.spell = a.spree.flatMap((m) => m.fx); cover(ALL); },
+    'Cephalid Coliseum': (a, cover) => { a.activated.push({ tap: true, sac: true, cost: parseCost('U'), threshold: 7, fx: [{ k: 'loot', draw: 3, n: 3 }], text: 'Threshold: draw three cards, then discard three.' }); cover(ALL); },
+    'Psychic Frog': (a, cover) => { a.activated.push({ cost: parseCost(''), exileGy: 3, fx: [{ k: 'kwSelf', kw: 'flying' }], text: 'Exile three cards from your graveyard: gains flying until end of turn.' }); cover(/^Exile three cards from your graveyard/i); },
+    'Liliana the Repentant': (a, cover) => { (a.myCreatureEtb = a.myCreatureEtb || []).push([{ k: 'mill', n: 2 }]); a.activated.push({ cost: parseCost('5 B'), sorcery: true, exhaust: true, exhaustCounter: true, fx: [{ k: 'reanimate', any: false }], text: 'Exhaust: return a creature card from your graveyard to the battlefield; a +1/+1 counter on Liliana.' }); cover(ALL); },
+    'Guide of Souls': (a, cover) => { a.myCreatureEtb = [[{ k: 'gain', n: 1 }, { k: 'energy', n: 1 }]]; a.triggers.push({ k: 'youAttack', fx: [{ k: 'guideAngel' }] }); cover(ALL); },
+    'The Queen of Dale': (a, cover) => { a.triggers.push({ k: 'queenRecruit' }); cover(ALL); },
+    'Disciple of Deceit': (a, cover) => { a.inspiredTutor = true; a.statics = a.statics.filter((x) => x.k !== 'misc'); cover(ALL); },
     'Archon of Cruelty': (a, cover) => { a.etb = [{ k: 'edict', one: true }, { k: 'discard', n: 1, one: true }, { k: 'drainOne', n: 3 }, { k: 'draw', n: 1 }]; a.attack = a.etb.map((f) => ({ ...f })); cover(ALL); },
     'Wonder': (a, cover) => { a.gyFlyIsland = true; cover(ALL); }, // (from the graveyard with an Island out: our creatures fly; see _kws)
     'Academy Rector': (a, cover) => { a.dies = [{ k: 'rectorExile' }, { k: 'search', n: 1, what: 'enchantment', dest: 'bf', needsRector: true }]; cover(/dies/); },
@@ -902,6 +913,8 @@
 const ALT_COLORS = { white: 'W', blue: 'U', black: 'B', red: 'R', green: 'G' };
 function parseAltCost(low) {
   if (/if you control a commander, you may cast .*without paying its mana cost/.test(low)) return { kind: 'commander' };
+  let w;
+  if ((w = low.match(/^web-slinging (\{[^}]+\}(?:\{[^}]+\})*)/))) return { kind: 'webSling', mana: w[1].replace(/[{}]/g, ' ').trim().toUpperCase() }; // (that mana + return a tapped creature)
   if (!/rather than pay/.test(low)) return null;
   const notYourTurn = /^if it's not your turn/.test(low);
   let m;
@@ -1215,6 +1228,7 @@ function analyzeCard(data, deckColors, fullName) {
       const s = new Set(c.info.kw);
       c.eot.kw.forEach((k) => s.add(k));
       const ctrl = this.P(c.ctrl);
+      if (c.flyingCounter) s.add('flying');
       // Wonder: from the graveyard, with an Island out, our creatures fly
       if (c.info.isCreature && ctrl.gy.some((x) => x.info.gyFlyIsland) && ctrl.bf.some((l) => l.info.isLand && this.landTypes(ctrl, l).includes('Island'))) s.add('flying');
       for (const { s: st, c: src } of this.statics(ctrl, 'anthem')) {
@@ -1337,6 +1351,11 @@ function analyzeCard(data, deckColors, fullName) {
         if (p.drawsTurn !== this.turn) { p.drawsTurn = this.turn; p.drawsThis = 0; }
         p.drawsThis++;
         if (this.started) this.onDraw(p);
+        // miracle: the first card drawn this turn may be cast right away for its miracle cost
+        if (this.started && p.drawsThis === 1 && c.info.miracle && !this._inMiracle && !this.locked(p) && this.pay(p, c.info.miracle) && this.scoreCast(p, c, 'hand') > 0) {
+          this._inMiracle = true; this.emit('cast', `Miracle! ${p.name} reveals ${c.info.name}.`, { seat: p.seat, cards: [c.id] });
+          try { this.castSpell(p, c, 'miracle'); } finally { this._inMiracle = false; }
+        }
       }
       if (this._drawPain) { this._drawPain = false; this.checkState(); }
       if (why) this.emit('draw', `${p.name} draws ${n} card${n > 1 ? 's' : ''}${why ? ' (' + why + ')' : ''}.`, { seat: p.seat });
@@ -2948,6 +2967,16 @@ function analyzeCard(data, deckColors, fullName) {
           this.connive(p, t, atk.length);
           break;
         }
+        case 'kwSelf': if (src && src.zone === 'bf') src.eot.kw.push(fx.kw); break;
+        case 'energy': p.energy = (p.energy || 0) + (X(fx.n) || 1); break;
+        case 'guideAngel': { // pay three energy: two +1/+1 counters and a flying counter on an attacker
+          const atk = (this._attackersNow || []).filter((c) => c.zone === 'bf' && !this.hasKw(c, 'flying'));
+          if ((p.energy || 0) < 3 || !atk.length) break;
+          const t = atk.sort((a, b) => this.power(b) - this.power(a))[0];
+          p.energy -= 3; t.p1 += this.counterAmount(p, 2); t.flyingCounter = true;
+          this.emit('effect', `${name}: ${p.name} pays three energy; ${t.info.name} gets two +1/+1 counters and a flying counter.`, { seat: p.seat, cards: [t.id] });
+          break;
+        }
         case 'countersKw': for (const c of p.bf) if (c.info.isCreature && c.p1 > 0) c.eot.kw.push(fx.kw); if (!quiet) this.emit('effect', `${name}: creatures with counters gain ${fx.kw}.`, { seat: p.seat }); break;
         case 'millOpp': { const q = this.opps(p).sort((a, b) => a.library.length - b.library.length)[0]; const n = X(fx.n); if (q && n > 0) { this.mill(q, n); this.emit('effect', `${name}: ${q.name} mills ${n}.`, { seat: p.seat, target: q.seat }); } break; }
         case 'untapLandsUpTo': { const ls = p.bf.filter((c) => c.info.isLand && c.tapped).sort((a, b) => this.landValue(p, b) - this.landValue(p, a)).slice(0, fx.n); for (const c of ls) c.tapped = false; if (ls.length && !quiet) this.emit('effect', `${name}: ${p.name} untaps ${ls.length} land${ls.length > 1 ? 's' : ''}.`, { seat: p.seat }); break; }
@@ -3231,6 +3260,8 @@ function analyzeCard(data, deckColors, fullName) {
       if (!card) return false;
       const useAlt = !!card.info.altCost && this.altChosen(q, card, 'hand');
       if (useAlt) this.payAltCost(q, card);
+      // gift a card (Dawn's Truce): promised for the indestructible half; the opponent with the fewest cards draws one
+      if (card.info.gift) { const o = this.opps(q).sort((a, b) => a.hand.length - b.hand.length)[0]; if (o) { this.draw(o, 1); this.emit('effect', `${q.name} promises ${o.name} a gift: they draw a card.`, { seat: q.seat, target: o.seat }); } }
       else if (card.info.kickerProtectAll && wipe) this.pay(q, { ...card.info.cost, generic: card.info.cost.generic + card.info.kickerProtectAll.generic, pips: card.info.cost.pips.concat(card.info.kickerProtectAll.pips) }, 0, true);
       else this.pay(q, this.costFor(q, card, 'hand'), 0, true);
       this.removeFrom(q.hand, card);
@@ -3602,6 +3633,7 @@ function analyzeCard(data, deckColors, fullName) {
       if (a.kind === 'commander') return p.bf.some((x) => x.isCommander);
       if (a.kind === 'exile') return p.hand.some((x) => x !== c && x.info.colors && x.info.colors.has(a.color)) && (!a.life || this.canPayLife(p, a.life));
       if (a.kind === 'sac') return !!this.altSacPick(p, c);
+      if (a.kind === 'webSling') return p.bf.some((x) => x.info.isCreature && x.tapped && !x.isCommander) && this.pay(p, parseCost(a.mana));
       if (a.kind === 'life') return (!a.ifControl || p.bf.some((x) => (x.info.isLand ? this.landTypes(p, x) : x.info.subtypes || []).includes(a.ifControl))) && this.canPayLife(p, a.n);
       return false;
     }
@@ -3616,9 +3648,23 @@ function analyzeCard(data, deckColors, fullName) {
       if (a.kind === 'exile') { const x = p.hand.filter((y) => y !== c && y.info.colors && y.info.colors.has(a.color)).sort((y, z) => this.cardValue(p, y) - this.cardValue(p, z))[0]; this.removeFrom(p.hand, x); x.zone = 'exile'; p.exile.push(x); if (a.life) this.loseLife(p, a.life); this.emit('effect', `${p.name} exiles ${x.info.name} from hand to cast ${c.info.name} for free.`, { seat: p.seat, cards: [c.id, x.id] }); }
       else if (a.kind === 'sac') { const x = this.altSacPick(p, c); this.emit('effect', `${p.name} sacrifices ${x.info.name} to cast ${c.info.name} for free.`, { seat: p.seat, cards: [c.id, x.id] }); this.destroy(x, 'sacrificed', true); }
       else if (a.kind === 'life') { this.emit('effect', `${p.name} pays ${a.n} life to cast ${c.info.name}.`, { seat: p.seat, cards: [c.id] }); this.loseLife(p, a.n); }
+      else if (a.kind === 'webSling') { // the mana, plus a tapped creature back to hand (one with an enters ability, to replay)
+        this.pay(p, parseCost(a.mana), 0, true);
+        const x = p.bf.filter((y) => y.info.isCreature && y.tapped && !y.isCommander).sort((y, z) => (z.info.etb.length ? 5 : 0) - this.creatureValue(z) * 0.1 - ((y.info.etb.length ? 5 : 0) - this.creatureValue(y) * 0.1))[0];
+        this.emit('effect', `${p.name} web-slings ${c.info.name}, returning ${x.info.name} to hand.`, { seat: p.seat, cards: [c.id, x.id] }); this.bounce(x);
+      }
+    }
+    // Spree: every mode we can afford on top of the base cost (life loss only if safe), most valuable first
+    spreeModes(p, c, base = c.info.cost) {
+      const add = (cost, m) => ({ ...cost, generic: cost.generic + m.cost.generic, pips: cost.pips.concat(m.cost.pips), mv: (cost.mv || 0) + (m.cost.mv || 0) });
+      const ok = (m) => !m.fx.some((f) => f.k === 'loseSelf' && !this.canPayLife(p, +f.n || 0));
+      const modes = c.info.spree.filter(ok).slice().reverse(); let cost = base; const out = [];
+      for (const m of modes) { const t = add(cost, m); if (this.pay(p, t)) { cost = t; out.push(m); } }
+      return out;
     }
     costFor(p, c, from, normal = false) {
       if (from === 'citadel' || from === 'valgavoth') return parseCost('');
+      if (from === 'miracle') return c.info.miracle;
       if (from === 'prepared') return parseCost(c.info.prepared.cost);
       if (from === 'channel') { const leg = p.bf.filter((x) => x.info.isCreature && x.info.isLegendary).length; const cc = c.info.channel.cost; return { ...cc, generic: Math.max(0, cc.generic - leg), mv: Math.max(cc.mv - cc.generic, cc.mv - leg) }; }
       if (!normal && c.info.altCost && this.altChosen(p, c, from)) return parseCost(''); // (paid in castSpell / tryProtect / counter responses)
@@ -3632,6 +3678,7 @@ function analyzeCard(data, deckColors, fullName) {
       // Thalia: noncreature spells cost more, for every player
       if (!c.info.isCreature && !c.info.isLand) { const tax = this.alive().reduce((a2, q) => a2 + this.statics(q, 'taxNoncreature').reduce((b, x) => b + x.s.n, 0), 0); if (tax) cost = { ...cost, generic: cost.generic + tax, mv: (cost.mv || 0) + tax }; }
       if (c.info.convoke) { const helpers = p.bf.filter((x) => x.info.isCreature && !x.tapped && !this.canAttack(x)).length; cost = { ...cost, generic: Math.max(0, cost.generic - helpers) }; }
+      if (c.info.spree && !normal) { const ms = this.spreeModes(p, c, cost); c._spree = ms; if (!ms.length) return { ...cost, generic: cost.generic + 99, mv: (cost.mv || 0) + 99 }; for (const m of ms) cost = { ...cost, generic: cost.generic + m.cost.generic, pips: cost.pips.concat(m.cost.pips), mv: (cost.mv || 0) + (m.cost.mv || 0) }; }
       // delve: each card exiled from the graveyard pays for one generic mana (exiled in castSpell)
       if (c.info.delve) { const n = Math.min(cost.generic, p.gy.filter((x) => x !== c).length); c._delveN = n; if (n) cost = { ...cost, generic: cost.generic - n }; }
       return cost;
@@ -3850,7 +3897,7 @@ function analyzeCard(data, deckColors, fullName) {
       else if (from === 'gy') { this.removeFrom(p.gy, c); p.gyCastTypes.add(gyType); }
       else if (from === 'citadel' || from === 'top') { this.removeFrom(p.library, c); if (from === 'citadel') this.loseLife(p, i.mv); }
       else if (from === 'valgavoth') { this.removeFrom(this.P(c.owner).exile, c); c.voidBy = null; this.loseLife(p, i.mv); }
-      else if (from === 'dash') { this.removeFrom(p.hand, c); }
+      else if (from === 'dash' || from === 'miracle') { this.removeFrom(p.hand, c); }
       else if (from === 'flashback') { this.removeFrom(p.gy, c); c.flashedBack = true; }
       if (p.lost || this.over) { c.zone = 'exile'; this.P(c.owner).exile.push(c); return true; } // paying life (Citadel, Valgavoth) set off something that ended them
       c.zone = 'stack';
@@ -3859,6 +3906,7 @@ function analyzeCard(data, deckColors, fullName) {
       { const st = this.stats[c.id] || (this.stats[c.id] = { name: c.name, seat: c.owner }); if (st.cast == null) st.cast = this.round; }
       p.spellsThisTurn = (p.spellsThisTurn || 0) + 1;
       if (!i.isCreature) p.nonCreatureSpells = (p.nonCreatureSpells || 0) + 1;
+      if (!i.isCreature && p.nonCreatureSpells === 1) for (const q of this.opps(p)) for (const s2 of q.bf) if (s2.info.triggers.some((t) => t.k === 'queenRecruit')) this.recruit(q, s2);
       if (!i.types.has('Artifact')) p.nonArtifactSpells = (p.nonArtifactSpells || 0) + 1;
       const fromTxt = { flashback: ' with flashback', command: ' from the command zone', gy: ' from the graveyard', citadel: ' off the top with Bolas\'s Citadel', top: ' off the top with Mystic Forge', valgavoth: ' from Valgavoth\'s exile', dash: ' for its dash cost' }[from] || '';
       this.emit('cast', `${p.name} casts ${i.name}${xVal ? ` (X=${xVal})` : ''}${kicks ? ` kicked ${kicks}×` : ''}${fromTxt}.`, { seat: p.seat, cards: [c.id], stack: [c.id], nnAdv: c._nnAdv });
@@ -3883,7 +3931,7 @@ function analyzeCard(data, deckColors, fullName) {
         if (from === 'dash') { c.dashed = true; c.eot.kw.push('haste'); }
         if (i.etb.length && xVal) { /* X handled in effects */ }
       } else {
-        const fx = overload ? i.spell.filter((f) => f.k !== 'removal').concat(cost === i.overload ? [{ k: 'massBounce' }] : i.spell.filter((f) => f.k === 'removal')) : i.spell;
+        const fx = overload ? i.spell.filter((f) => f.k !== 'removal').concat(cost === i.overload ? [{ k: 'massBounce' }] : i.spell.filter((f) => f.k === 'removal')) : i.spree ? (c._spree || []).flatMap((m) => m.fx) : i.spell; // (spree: the modes chosen when the cost was set)
         this.resolveEffects(p, fx, c, null, false, xVal);
         if (c.zone === 'stack') { if (c.flashedBack || /exile .* protection/i.test(i.text)) { c.zone = 'exile'; this.P(c.owner).exile.push(c); c.flashedBack = false; } else this.toGraveyard(c, p.seat); }
       }
@@ -3940,6 +3988,15 @@ function analyzeCard(data, deckColors, fullName) {
       }
     }
 
+    // recruit: draw a card, discard a card; a nonland discard makes a 1/1 Human Soldier
+    recruit(q, s) {
+      this.draw(q, 1);
+      const d = q.hand.slice().sort((a, b) => this.cardValue(q, a) - this.cardValue(q, b))[0];
+      if (!d) return;
+      this.discardCard(q, d);
+      if (!d.info.isLand) this.addToken(q, { p: 1, t: 1, sub: 'Human Soldier', colors: 'white' }, 1, true);
+      this.emit('draw', `${s.info.name}: ${q.name} recruits${d.info.isLand ? '' : ' and makes a Human Soldier'}.`, { seat: q.seat, cards: [s.id] });
+    }
     // connive n: draw n, discard n (the worst), a +1/+1 counter for each nonland card discarded
     connive(q, s, n = 1) {
       this.emit('draw', `${s.info.name} connives${n > 1 ? ' ' + n : ''}.`, { seat: q.seat, cards: [s.id] });
@@ -4148,11 +4205,20 @@ function analyzeCard(data, deckColors, fullName) {
       if (p.phased && p.phased.length) { this._phasedIn = true; for (const c of p.phased) { c.zone = 'bf'; this.P(c.ctrl).bf.push(c); } this.emit('effect', `${p.phased.length} permanent${p.phased.length > 1 ? 's' : ''} phase back in for ${p.name}.`, { seat: p.seat }); p.phased = []; }
       for (const q of this.players) for (const c of q.bf) if (c.phasedOwnerTurn === p.seat) { c.phasedOwnerTurn = null; }
       if (this._phasedIn) { this._phasedIn = false; this.checkState(); } // what phased back in is checked at once (a 0/0 token dies)
+      const inspired = p.bf.filter((c) => c.info.inspiredTutor && c.tapped);
       for (const c of p.bf) {
         if (!c.info.noUntap && !(c.frozenUntil && c.frozenUntil > this.turn)) c.tapped = false;
         c.sick = false;
         if (c.neutralized && c.neutralizedBy === p.seat) c.neutralized = 0;
         if (c.animatedUntilTurnOf === p.seat) { this.restoreInfo(c); c.animatedUntilTurnOf = null; for (const e of this.allBf()) if (e.info.isEquipment && e.attached === c.id && !c.info.isCreature) e.attached = null; } // (equipment falls off a creature that stops being one)
+      }
+      // Disciple of Deceit (inspired): untapping, trade the weakest nonland card for the best card of the same mana value
+      for (const d of inspired) {
+        const pick = p.hand.filter((x) => !x.info.isLand).map((x) => ({ x, best: p.library.filter((y) => (y.info.mv || 0) === (x.info.mv || 0) && !y.info.isLand).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0] }))
+          .filter((o) => o.best && this.cardValue(p, o.best) > this.cardValue(p, o.x) + 3).sort((a, b) => this.cardValue(p, a.x) - this.cardValue(p, b.x))[0];
+        if (!pick) continue;
+        this.discardCard(p, pick.x); this.removeFrom(p.library, pick.best); pick.best.zone = 'hand'; p.hand.push(pick.best); this.R.shuffle(p.library);
+        this.emit('tutor', `${d.info.name}: ${p.name} discards ${pick.x.info.name} and finds ${pick.best.info.name}.`, { seat: p.seat, cards: [d.id] });
       }
       // Unwinding Clock: untap artifacts during each other player's untap step
       for (const q of this.opps(p)) if (this.has(q, 'unwinding')) for (const c of q.bf) if (c.info.types.has('Artifact')) c.tapped = false;
@@ -4625,6 +4691,8 @@ function analyzeCard(data, deckColors, fullName) {
 
     // Is it worth activating an ability with these effects right now?
     abilityUseful(p, ab, c, postCombat) {
+      const ks = ab.fx.find((f) => f.k === 'kwSelf');
+      if (ks) return !postCombat && this.active === p.seat && this.canAttack(c) && !this.hasKw(c, ks.kw) && this.opps(p).some((q) => q.bf.some((b) => b.info.isCreature && !b.tapped && this.canBlock(b, c))) && this.opps(p).some((q) => !q.bf.some((b) => b.info.isCreature && !b.tapped && (this.hasKw(b, 'flying') || this.hasKw(b, 'reach'))));
       if (ab.preCombat) return !postCombat && p.bf.some((x) => this.canAttack(x)) && this.opps(p).length > 0;
       if (ab.lowPriority && !postCombat) return false;
       return ab.fx.some((f) => {
@@ -4643,6 +4711,7 @@ function analyzeCard(data, deckColors, fullName) {
           case 'feldon': return p.gy.some((x) => x.info.isCreature && this.creatureValue({ ...x, p1: 0, eot: { p: 0, t: 0, kw: [] }, ctrl: p.seat, info: x.info }) > 6);
           case 'osgir': return p.gy.some((x) => x.info.types.has('Artifact') && x.info.isPermanent && x.info.mv <= this.availableMana(p));
           case 'reanimateArtifact': return p.gy.some((x) => x.info.types.has('Artifact'));
+          case 'reanimate': return p.gy.some((x) => x.info.isCreature && this.cardValue(p, x) > 4); // (Liliana the Repentant's exhaust)
           case 'weld': { const best = Math.max(-1, ...p.gy.filter((x) => x.info.types.has('Artifact') && x.info.isPermanent).map((x) => this.cardValue(p, x))); const worst = Math.min(99, ...p.bf.filter((x) => x.info.types.has('Artifact') && x !== c).map((x) => this.permValue(x))); return best > worst + 1; }
           case 'regrowTop': return p.gy.some((x) => x.info.types.has(cap(f.what)));
           case 'cheatCreature': return p.hand.some((x) => x.info.isCreature && x.info.mv >= 5);
@@ -4697,6 +4766,7 @@ function analyzeCard(data, deckColors, fullName) {
       if (ab.life && !(loose ? p.life - ab.life >= 1 : this.canPayLife(p, ab.life, this.abilityWinsNow(p, ab, c)))) return null; // keeps us above what the table can hit us for, unless this wins
       if (ab.sacOther && !ab.sacArtifact && !ab.sacCreature && !ab.sacArtifactN) return null;
       if (ab.discard && p.hand.length < ab.discard + 1) return null;
+      if ((ab.threshold && p.gy.length < ab.threshold) || (ab.exileGy && p.gy.length < ab.exileGy) || (ab.exhaust && c.exhausted)) return null; // threshold, exile-from-graveyard cost, exhaust (once)
       if ((ab.sacCreature || ab.discard) && !ab.fx.some((f) => ['draw', 'tutor', 'damage', 'removal', 'search', 'drain', 'tokens', 'proliferate', 'millPower'].includes(f.k))) return null;
       if (!this.abilityUseful(p, ab, c, postCombat)) return null;
       let fodder = [];
@@ -4827,6 +4897,8 @@ function analyzeCard(data, deckColors, fullName) {
       if (cost.mv) this.pay(p, cost, 0, true);
       if (ab.tap) c.tapped = true;
       if (ab.life) this.loseLife(p, ab.life);
+      if (ab.exileGy) { const ex = p.gy.slice().sort((a, b) => (a.info.isCreature ? 10 : 0) + (a.info.mv || 0) * 0.3 - ((b.info.isCreature ? 10 : 0) + (b.info.mv || 0) * 0.3)).slice(0, ab.exileGy); for (const x of ex) { this.removeFrom(p.gy, x); x.zone = 'exile'; p.exile.push(x); } }
+      if (ab.exhaust) { c.exhausted = true; if (ab.exhaustCounter) c.p1 += this.counterAmount(p, 1); }
       if (p.lost || this.over) return; // paying (painland damage, life) can end the game first
       this._sacMv = fodder.length ? Math.max(...fodder.map((x) => x.info.mv)) : null;
       this._sacPower = fodder.length ? Math.max(...fodder.filter((x) => x.info.isCreature).map((x) => this.power(x)), 0) : 0;

@@ -25,6 +25,111 @@ export default [
       return { ok: ok1 && frog.zone !== 'bf' && sphinx.zone === 'bf', note: `available ${ok1}; Psychic Frog ${frog.zone}` };
     },
   },
+  // ---------- graveyard counts, energy, recruit, inspired, miracle, spree ----------
+  {
+    card: 'Cephalid Coliseum', title: 'with threshold, draws three and discards three; without, it cannot',
+    wrong: 'its threshold ability was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const me = g.players[0]; me.gy = []; const cc = put(g, me, 'Cephalid Coliseum'); put(g, me, 'Island');
+      const ab = cc.info.activated.find((x) => x.threshold); const before = !!(ab && g.prepareAbility(me, cc, ab, false));
+      for (let i = 0; i < 7; i++) card(g, me, 'Swamp', 'gy'); const h0 = me.hand.length, gy0 = me.gy.length;
+      const prep = ab && g.prepareAbility(me, cc, ab, false); if (prep) g.doActivate(me, prep);
+      return { ok: !before && !!prep && cc.zone !== 'bf' && me.hand.length === h0 && me.gy.length === gy0 + 4, note: `usable at 0 cards ${before}; hand ${h0} -> ${me.hand.length}, graveyard ${gy0} -> ${me.gy.length}` };
+    },
+  },
+  {
+    card: 'Psychic Frog', title: 'exiles three graveyard cards to gain flying (needs three)',
+    wrong: 'its "exile three cards from your graveyard" ability was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const [me, opp] = g.players; me.gy = []; const f = put(g, me, 'Psychic Frog'); f.sick = false;
+      g.active = me.seat; g.phase = 'main1'; for (const q of g.opps(me)) q.bf = q.bf.filter((c) => !c.info.isCreature); put(g, opp, 'Old Gnawbone'); for (const q of g.opps(me)) if (q !== opp) q.bf = q.bf.filter((c) => !c.info.isCreature);
+      const ab = f.info.activated.find((x) => x.exileGy); const before = !!(ab && g.prepareAbility(me, f, ab, false));
+      for (let i = 0; i < 3; i++) card(g, me, 'Swamp', 'gy'); const prep = ab && g.prepareAbility(me, f, ab, false); if (prep) g.doActivate(me, prep);
+      return { ok: !before && g.hasKw(f, 'flying') && me.gy.length === 0, note: `usable with 0 cards ${before}; flying ${g.hasKw(f, 'flying')}; graveyard ${me.gy.length}` };
+    },
+  },
+  {
+    card: 'Liliana the Repentant', title: 'another creature entering mills two; exhaust returns a creature card',
+    wrong: 'her triggered and exhaust abilities were not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const me = g.players[0]; me.gy = []; const l = put(g, me, 'Liliana the Repentant'); l.sick = false;
+      const gy0 = me.gy.length; g.enterBattlefield(card(g, me, 'Psychic Frog', 'hand'), me, {}); const milled = me.gy.length - gy0;
+      const big = card(g, me, 'Archfiend of Ifnir', 'gy'); for (const c of me.bf) if (c.info.isLand) c.tapped = false;
+      const ab = l.info.activated.find((x) => x.exhaust); const prep = ab && g.prepareAbility(me, l, ab, false); if (prep) g.doActivate(me, prep);
+      const again = ab && g.prepareAbility(me, l, ab, false);
+      return { ok: milled === 2 && big.zone === 'bf' && !again, note: `milled ${milled}; Archfiend in ${big.zone}; exhaust usable again ${!!again}` };
+    },
+  },
+  {
+    card: 'Guide of Souls', title: 'another creature entering gives 1 life and 1 energy',
+    wrong: 'its creature-enters trigger was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const me = g.players[0]; put(g, me, 'Guide of Souls'); const l0 = me.life, e0 = me.energy || 0;
+      g.enterBattlefield(card(g, me, 'Psychic Frog', 'hand'), me, {});
+      return { ok: me.life === l0 + 1 && (me.energy || 0) === e0 + 1, note: `life ${l0} -> ${me.life}, energy ${e0} -> ${me.energy || 0}` };
+    },
+  },
+  {
+    card: 'The Queen of Dale', title: 'an opponent\'s first noncreature spell each turn makes her controller recruit',
+    wrong: 'her trigger was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const [me, opp] = g.players; put(g, me, 'The Queen of Dale'); me.hand = [];
+      const dt = card(g, opp, 'Demonic Tutor', 'hand'); g.active = opp.seat; const gy0 = me.gy.length; opp.nonCreatureSpells = 0;
+      g.castSpell(opp, dt, 'hand');
+      return { ok: me.gy.length === gy0 + 1, note: `graveyard ${gy0} -> ${me.gy.length} (drew one, discarded one)` };
+    },
+  },
+  {
+    card: 'Disciple of Deceit', title: 'untapping, trades a weak card for a better one of the same mana value',
+    wrong: 'its inspired trigger was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const me = g.players[0]; me.hand = []; const d = put(g, me, 'Disciple of Deceit'); d.tapped = true;
+      const cand = me.library.find((y) => !y.info.isLand);
+      const mv = cand ? cand.info.mv || 0 : 0; const filler = card(g, me, cand ? cand.info.name : 'Psychic Frog', 'hand'); me.hand = [filler];
+      const old = g.cardValue; g.cardValue = (p, x) => (x === filler ? -10 : old.call(g, p, x));
+      g.active = me.seat; g.takeTurn(me, false); g.cardValue = old;
+      return { ok: filler.zone === 'gy' || filler.zone === 'exile' || !me.hand.includes(filler), note: `the weak copy (mana value ${mv}) is in ${filler.zone}` };
+    },
+  },
+  {
+    card: 'Metamorphosis Fanatic', title: 'drawn first in a turn with mana up, it is cast for its miracle cost',
+    wrong: 'miracle was not read',
+    run({ table, put }) {
+      const g = raffine(table); const me = g.players[0]; me.hand = []; for (let i = 0; i < 4; i++) put(g, me, 'Swamp');
+      for (const c of me.bf) if (c.info.isLand) c.tapped = false; const mf = me.library.find((c) => c.info.name === 'Metamorphosis Fanatic') || null;
+      if (!mf) return { ok: false, note: 'not in library' };
+      g.removeFrom(me.library, mf); me.library.unshift(mf); me.cardsDrawnThisTurn = 0; me.drawnThisTurn = 0; g.draw(me, 1);
+      return { ok: mf.zone === 'bf', note: `Metamorphosis Fanatic in ${mf.zone}` };
+    },
+  },
+  {
+    card: 'Insatiable Avarice', title: 'spree: with enough mana it pays for both modes (tutor and draw three)',
+    wrong: 'spree was not read: it had no modes or paid for none',
+    run({ table, put, card }) {
+      const g = raffine(table); const me = g.players[0]; me.hand = []; for (let i = 0; i < 4; i++) put(g, me, 'Swamp'); for (const c of me.bf) if (c.info.isLand) c.tapped = false;
+      const ia = card(g, me, 'Insatiable Avarice', 'hand'); const cost = g.costFor(me, ia, 'hand'); const l0 = me.life;
+      return { ok: cost.mv === 5 && (ia._spree || []).length === 2, note: `cost mana value ${cost.mv}, modes ${(ia._spree || []).length}; life ${l0}` };
+    },
+  },
+  {
+    card: 'Spider-Sense', title: 'web-slinging: its alternative cost returns a tapped creature',
+    wrong: 'web-slinging was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const me = g.players[0]; me.hand = []; const ss = card(g, me, 'Spider-Sense', 'hand');
+      const none = g.altCostOk(me, ss); const f = put(g, me, 'Psychic Frog'); f.tapped = true; const some = g.altCostOk(me, ss);
+      return { ok: !none && some, note: `with no tapped creature ${none}, with one ${some}` };
+    },
+  },
+  {
+    card: 'Abhorrent Oculus', title: 'each opponent\'s upkeep it manifests dread (a 2/2)',
+    wrong: 'manifest dread was not read',
+    run({ table, put }) {
+      const g = raffine(table); const [me, opp] = g.players; put(g, me, 'Abhorrent Oculus'); const n0 = me.bf.filter((c) => c.info.isCreature).length;
+      g.active = opp.seat; g.takeTurn(opp, false);
+      const n1 = me.bf.filter((c) => c.info.isCreature).length;
+      return { ok: n1 === n0 + 1, note: `creatures ${n0} -> ${n1}` };
+    },
+  },
   // ---------- spells that target spells ----------
   {
     card: 'Reprieve', title: 'returns an opponent\'s spell to their hand, and draws a card',
