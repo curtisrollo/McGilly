@@ -910,7 +910,7 @@
       this.lookahead = opts.lookahead !== false && !(typeof process !== 'undefined' && process.env && process.env.NOLOOK);    // try the best few plays on a copy of the game before choosing (see lookPick)
       this.lookSeats = opts.lookSeats || null;      // which seats search (default: all)
       this.politics = opts.politics ?? (typeof process !== 'undefined' && process.env && process.env.POLITICS ? +process.env.POLITICS : 40); // weight on attacking whoever is most likely to win
-      this.samples = []; this.mullSamples = [];
+      this.samples = []; this.mullSamples = []; this.searchSamples = []; // (searchSamples: what the look-ahead found, for training)
     }
 
     // ----- statistics: credit each result to the card that caused it -----
@@ -4273,6 +4273,7 @@
       if (!loose.length && (cands.length < 2 || (!cands.some((c) => c.ab) && !this.comboWants(p).length))) return null;
       for (const a of loose.slice(0, 3)) cands.push({ ab: a, loose: true });
       if (cands.length < 2) return null;
+      const learn = this.collect && this.nnOn(p) ? { seat: p.seat, deck: p.deckId, st: this.nnState(p), turn: this.round } : null, learnT = [];
       const res = cands.map((pk) => {
         try {
           const g = this.cloneForLook(), pp = g.players[p.seat];
@@ -4283,9 +4284,17 @@
           if (!g.over && !pp.lost) g.mainPhase(pp, second);
           // from the first main phase, play the rest of the turn too: a creature cast now attacks, mana held up isn't wasted
           if (!second && !g.over && !pp.lost && g.active === p.seat) { g.emptyPools(); g.phase = 'combat'; g.combat(pp); if (!g.over && !pp.lost) { g.emptyPools(); g.phase = 'main 2'; g.mainPhase(pp, true); } }
+          if (learn) learnT[cands.indexOf(pk)] = g.winner === p.seat ? 1 : pp.lost || g.over ? 0 : g.nnV(pp); // the line's result, for training
           return g.lookValue(g, p.seat);
         } catch (e) { return -Infinity; }
       });
+      // Learning from the search (training games only): each cast option's result is an example of what casting that card
+      // here leads to, cast or not; the best line's result is an example of what this position is worth
+      if (learn) {
+        cands.forEach((pk, i) => { if (pk.o && learnT[i] != null && isFinite(res[i])) this.searchSamples.push({ ...learn, name: pk.o.c.name, from: pk.o.from, card: this.nnCard(p, pk.o.c, pk.o.from), y: learnT[i] }); });
+        const best = Math.max(...learnT.filter((t, i) => t != null && isFinite(res[i])));
+        if (isFinite(best)) this.searchSamples.push({ ...learn, name: null, y: best });
+      }
       let bi = 0; for (let i = 1; i < res.length; i++) if (res[i] > res[bi]) bi = i;
       // only leave the greedy play for a clearly better line
       return bi > 0 && res[bi] > res[0] + 4 ? cands[bi] : null;

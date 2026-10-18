@@ -21,6 +21,7 @@ const { MLP } = require('./src/nn.js');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i >= 0 ? +process.argv[i + 1] : d; };
 const GENS = arg('gens', 4), N = arg('games', 500), AB = arg('ab', 400), fresh = process.argv.includes('--fresh');
 const CORES = Math.max(1, arg('cores', os.cpus().length - 1));
+const SEARCH_W = arg('search', 0.5); // weight of the look-ahead's verdicts as training examples (0: outcomes only)
 const OUT = 'data/nn.json';
 const db = JSON.parse(fs.readFileSync('data/cards.json', 'utf8'));
 const ids = fs.readdirSync('decks').filter((f) => f.endsWith('.txt')).map((f) => f.replace('.txt', '')).sort();
@@ -46,6 +47,12 @@ function playOne(spec, nn) {
     const y = (seat) => (game.winner === seat ? 1 : game.winner == null ? 0.25 : 0);
     r.out = game.samples.flatMap((x) => toQ(x, y(x.seat)));
     r.hands = game.mullSamples.map((h) => ({ d: h.d.slice(0, 11).concat(deckOneHot(h.deck)), s: h.names.map((nm) => vIdx.get(nm)).filter((k) => k != null), y: y(h.seat) }));
+    // learning from the search: what each option the look-ahead tried led to (cast or not), and what the position was worth
+    r.search = SEARCH_W > 0 ? game.searchSamples.map((x) => {
+      const k = x.name ? vIdx.get(x.name) : undefined;
+      return x.name ? { d: x.st.concat(x.card, [0], deckOneHot(x.deck)), s: k != null ? [k] : [], y: x.y, w: SEARCH_W }
+        : { d: x.st.concat(new Array(Game.NN_CARD).fill(0), [1], deckOneHot(x.deck)), s: [], y: x.y, w: SEARCH_W * 0.5 };
+    }) : [];
   }
   return r;
 }
@@ -102,17 +109,19 @@ const buffer = []; // last few generations of samples
 const R = rng(1234 + gen);
 
 async function play(n, seed0, nn, explore) {
-  const out = [], hands = [], wins = Object.fromEntries(ids.map((id) => [id, [0, 0]]));
+  const out = [], hands = [], search = [], wins = Object.fromEntries(ids.map((id) => [id, [0, 0]]));
+  let searchN = 0;
   const specs = [];
   for (let g = 0; g < n; g++) specs.push({ pod: R.shuffle(decks.slice()).slice(0, 4).map((d) => d.id), seed: seed0 + g, explore, collect: true });
   const res = await runGames(specs, nn, nn ? 'gen' + seed0 : null, 'games');
   res.forEach((r, g) => {
     const sp = specs[g];
     if (r.runaway) console.log(`    game ${sp.seed} got stuck in a loop and was called a draw (${sp.pod.join(', ')})`);
-    out.push(...r.out); hands.push(...r.hands);
+    out.push(...r.out); search.push(...r.search); hands.push(...r.hands); searchN += r.search.length;
     sp.pod.forEach((id, seat) => { wins[id][1]++; if (r.winner === seat) wins[id][0]++; });
   });
-  return { out, hands, wins };
+  if (searchN) console.log(`    + ${searchN} examples from the look-ahead's verdicts`);
+  return { out, hands, search, wins };
 }
 function fit(net, data, epochs, lr) {
   const idx = data.map((_, i) => i);
@@ -134,10 +143,10 @@ for (let k = 0; k < GENS; k++) {
   gen++;
   const nn = gen > 1 || prev ? { ...pack(), base, generation: gen - 1 } : null; // (as JSON: each worker loads it)
   console.log(`Generation ${gen}: playing ${N} games ${nn ? 'with the network' : 'with the plain heuristics'} on ${CORES} cores...`);
-  const { out, hands, wins } = await play(N, 100000 * gen, nn, 6);
-  buffer.push({ out, hands }); if (buffer.length > 3) buffer.shift();
+  const { out, hands, search, wins } = await play(N, 100000 * gen, nn, 6);
+  buffer.push({ out, hands, search }); if (buffer.length > 3) buffer.shift();
   base = Object.fromEntries(ids.map((id) => [id, wins[id][1] ? wins[id][0] / wins[id][1] : 0.25]));
-  const qs = fit(q, buffer.flatMap((b) => b.out), 4, 0.002);
+  const qs = fit(q, buffer.flatMap((b) => b.out.concat(b.search || [])), 4, 0.002);
   const ms = fit(m, buffer.flatMap((b) => b.hands), 6, 0.003);
   history.push({ gen, games: N, samples: out.length, qLoss: +qs.loss.toFixed(4), qBase: +qs.base.toFixed(4), mLoss: +ms.loss.toFixed(4), mBase: +ms.base.toFixed(4) });
   console.log(`  win-chance network: validation loss ${qs.loss.toFixed(4)} vs ${qs.base.toFixed(4)} guessing the average; hand network ${ms.loss.toFixed(4)} vs ${ms.base.toFixed(4)} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
