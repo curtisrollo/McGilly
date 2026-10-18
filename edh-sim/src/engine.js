@@ -209,7 +209,7 @@
 
     // tokens
     const tokRe = /(?<!its controller |that player |target player |each opponent |opponent )creates? (a|an|one|two|three|four|five|six|x|\d+|that many|a number of) (tapped )?(?:(\d+|x)\/(\d+|x) )?([a-z ,-]*?)(creature )?tokens?(?: with ([^."]+))?/g;
-    while ((m = tokRe.exec(l))) {
+    while (!/tokens equal to cardname's power/.test(l) && (m = tokRe.exec(l))) { // ("equal to its power" has its own rule below)
       const desc = m[5] || '';
       if (/treasure/.test(desc)) { fx.push({ k: 'treasure', n: num(m[1]) }); continue; }
       if (/food|clue|blood|map|gold|powerstone/.test(desc) && !m[6]) { if (/clue/.test(desc)) fx.push({ k: 'draw', n: 0 }); continue; }
@@ -354,6 +354,8 @@
       if (low === 'overload') a.overload = parseCost(arg);
       if (low === 'dash') a.dash = parseCost(arg);
       if (low === 'delve') a.delve = true;
+      if (low === 'ward' && /^\d+$/.test(arg || '')) { a.wardMana = +arg; a.kw.add('ward'); }
+      if (low === 'ravenous') { a.etbCounters = 'X'; a.ravenous = true; } // enters with X +1/+1 counters; X >= 5: draw a card
       if (low === 'mobilize') a.mobilize = +arg || 1;
       if (low === 'flashback' && /^[\dWUBRGC ]+$/.test(arg || '')) a.flashback = parseCost(arg);
       if (low === 'cycling' && /^[\dWUBRGC ]+$/.test(arg || '')) a.cycling = parseCost(arg);
@@ -593,6 +595,9 @@
     }
     if (opts.length) a.mana = { opts, oneShot, dork: a.isCreature };
     if (a.isLand) a.unmodeled = a.unmodeled.filter((l) => !/enters tapped|you may pay [23] life|return a land you control to its owner.s hand|becomes tapped, it deals 1 damage/i.test(l));
+    // lines whose keyword is implemented elsewhere (the keyword list / enterBattlefield)
+    const kwDone = [[a.delve, /^delve/i], [a.mobilize, /^mobilize/i], [a.ravenous, /^ravenous/i], [a.etbMinus, /enters with (a|one|two|three|four|five|six|\w+) -1\/-1 counters? on it/i], [a.wardMana, /^(flying, )?ward \{\d+\}$/i]];
+    a.unmodeled = a.unmodeled.filter((l) => !kwDone.some(([on, re]) => on && re.test(l)));
     if (a.isLand) {
       const lo = otext.toLowerCase();
       a.etbTapped = /enters tapped|enters the battlefield tapped/.test(lo) && !/unless|if you don't|if you control two or more other lands/.test(lo);
@@ -2076,7 +2081,8 @@ function analyzeCard(data, deckColors, fullName) {
       if (c.info.etbCounters) c.p1 = this.counterAmount(p, c.info.etbCounters === 'X' ? (o.xVal || 0) : c.info.etbCounters);
       if (c.copyPlusOne && c.info.isCreature) c.p1 += this.counterAmount(p, 1);
       if (o.p1) c.p1 = (c.p1 || 0) + o.p1;
-      if (c.info.etbMinus) c.p1 = (c.p1 || 0) - c.info.etbMinus; // enters with -1/-1 counters (Flitterwing Nuisance, Moonshadow)
+      if (c.info.etbMinus) c.p1 = (c.p1 || 0) - c.info.etbMinus;
+      if (c.info.ravenous && (o.xVal || 0) >= 5) { this.draw(p, 1); this.emit('draw', `${c.info.name} is ravenous: ${p.name} draws a card.`, { seat: p.seat, cards: [c.id] }); } // enters with -1/-1 counters (Flitterwing Nuisance, Moonshadow)
       // charge counters it enters with count as counters being put on it (Doubling Season doubles them)
       if (c.info.chargeX) c.charge = o.xVal ? this.counterAmount(p, o.xVal, 'charge') : 0;
       if (c.info.multikicker) c.charge = o.kicks ? this.counterAmount(p, o.kicks, 'charge') : 0;
