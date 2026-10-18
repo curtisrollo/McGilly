@@ -305,6 +305,11 @@
     if (/prevent all combat damage that would be dealt this turn/.test(l)) fx.push({ k: 'fog' });
     else if (/prevent all damage that sources of the color of your choice would deal this turn/.test(l)) fx.push({ k: 'fog', color: true }); // (Prismatic Strands: the attack's colour)
     if (/^target player can't cast spells this turn/.test(l)) fx.push({ k: 'silence' }); // (Orim's Chant)
+    if (/target player mills cards equal to cardname's power/.test(l)) fx.push({ k: 'millOpp', n: 'POWER' }); // (Veteran Ice Climber)
+    if (/creatures you control gain flying and get \+x\/\+x until end of turn, where x is the number of creatures you control/.test(l)) fx.push({ k: 'overrun', p: 'X', t: 'X', kw: ['flying'] }); // (Moonshaker Cavalry)
+    if ((m = l.match(/untap up to (one|two|three|\d+) lands/))) fx.push({ k: 'untapLandsUpTo', n: num(m[1]) }); // (Cloud of Faeries)
+    if (/target artifact, creature, or planeswalker an opponent controls loses all abilities until your next turn/.test(l)) fx.push({ k: 'neutralize', short: true }); // (Azure Beastbinder)
+    if ((m = l.match(/create a number of 1\/1 ([a-z]+) ([a-z]+) creature tokens equal to cardname's power/))) fx.push({ k: 'tokens', n: 'POWER', p: 1, t: 1, sub: cap(m[2]), colors: m[1] }); // (Jacked Rabbit)
     if (/^you and permanents you control gain hexproof until end of turn/.test(l)) fx.push({ k: 'protect' }); // (Dawn's Truce)
     if (/exile the top (\w+) cards of your library\. you may play them this turn/.test(l)) fx.push({ k: 'impulse', n: num(l.match(/exile the top (\w+) cards of your library\. you may play them this turn/)[1]) });
     if ((m = l.match(/add \{r\} for each card in target opponent's hand/))) fx.push({ k: 'jeska' });
@@ -349,6 +354,7 @@
       if (low === 'overload') a.overload = parseCost(arg);
       if (low === 'dash') a.dash = parseCost(arg);
       if (low === 'delve') a.delve = true;
+      if (low === 'mobilize') a.mobilize = +arg || 1;
       if (low === 'flashback' && /^[\dWUBRGC ]+$/.test(arg || '')) a.flashback = parseCost(arg);
       if (low === 'cycling' && /^[\dWUBRGC ]+$/.test(arg || '')) a.cycling = parseCost(arg);
       if (low.startsWith('protection')) a.kw.add('protection');
@@ -464,6 +470,11 @@
       if (/^whenever a dragon you control enters, it deals x damage to any target, where x is the number of dragons you control/.test(low)) { a.triggers.push({ k: 'dragonTempest' }); continue; }
       if (/^whenever a creature you control with flying enters, it gains haste/.test(low)) { a.triggers.push({ k: 'flyHaste' }); continue; }
       if ((m = low.match(/^whenever an? ([a-z]+) you control attacks, (.*)$/))) { a.triggers.push({ k: 'tribalAttack', sub: cap(m[1]), fx: PE(m[2]) }); continue; }
+      // "whenever you attack": once per attack (Raffine's connive, Chocobo Knights)
+      if (/^whenever you attack, target attacking creature connives x, where x is the number of attacking creatures/.test(low)) { a.triggers.push({ k: 'youAttack', fx: [{ k: 'conniveAttacker' }] }); continue; }
+      if ((m = low.match(/^whenever you attack, creatures you control with counters on them gain ([a-z ]+) until end of turn/))) { a.triggers.push({ k: 'youAttack', fx: [{ k: 'countersKw', kw: m[1].trim() }] }); continue; }
+      if (/^creatures you control with \+1\/\+1 counters on them can't be blocked/.test(low)) { a.statics.push({ k: 'counterUnblockable' }); continue; } // (Herald of Secret Streams)
+      if (/^whenever you cycle or discard another card, put a -1\/-1 counter on each creature your opponents control/.test(low)) { a.triggers.push({ k: 'discardShrink' }); continue; } // (Archfiend of Ifnir)
       if (/^activated abilities of artifacts your opponents control can't be activated/.test(low)) { a.statics.push({ k: 'karn' }); continue; }
       if (/^all permanents are artifacts in addition to their other types/.test(low)) { a.statics.push({ k: 'lattice' }); continue; }
       if (/^whenever you activate an ability, if it isn't a mana ability, you may pay \{2\}\. if you do, copy that ability/.test(low)) { a.statics.push({ k: 'rings' }); continue; }
@@ -608,6 +619,7 @@
   // and `cover` marks which rules-text lines it accounts for (the audit uses this).
   const ALL = /./;
   const SCRIPTS = {
+    'Archon of Cruelty': (a, cover) => { a.etb = [{ k: 'edict', one: true }, { k: 'discard', n: 1, one: true }, { k: 'drainOne', n: 3 }, { k: 'draw', n: 1 }]; a.attack = a.etb.map((f) => ({ ...f })); cover(ALL); },
     'Wonder': (a, cover) => { a.gyFlyIsland = true; cover(ALL); }, // (from the graveyard with an Island out: our creatures fly; see _kws)
     'Academy Rector': (a, cover) => { a.dies = [{ k: 'rectorExile' }, { k: 'search', n: 1, what: 'enchantment', dest: 'bf', needsRector: true }]; cover(/dies/); },
     'Sun Titan': (a, cover) => { a.etb = [{ k: 'reanimate', any: false, mvMax: 3, perm: true, lands: true }]; a.attack = [{ k: 'reanimate', any: false, mvMax: 3, perm: true, lands: true }]; cover(ALL); },
@@ -1354,7 +1366,12 @@ function analyzeCard(data, deckColors, fullName) {
       c.zone = 'gy'; owner.gy.push(c);
       if (c.info.isLand) { if (this._landBatch) this._landBatch.add(owner.seat); else for (const x of owner.bf) for (const t of x.info.triggers) if (t.k === 'landToGy') this.resolveEffects(owner, t.fx, x, null, false); }
     }
-    discardCard(p, c) { this.removeFrom(p.hand, c); if (this.has(p, 'necro')) { c.zone = 'exile'; p.exile.push(c); return; } this.toGraveyard(c); }
+    discardCard(p, c) {
+      this.removeFrom(p.hand, c); if (this.has(p, 'necro')) { c.zone = 'exile'; p.exile.push(c); } else this.toGraveyard(c);
+      // Archfiend of Ifnir: each discard puts a -1/-1 counter on every creature the opponents control
+      const fiends = p.bf.filter((x) => x !== c && x.info.triggers.some((t) => t.k === 'discardShrink')).length;
+      if (fiends && this.started) { for (const q of this.opps(p)) for (const x of q.bf) if (x.info.isCreature) x.p1 -= fiends; this.emit('effect', `Archfiend of Ifnir: -1/-1 counters on every opposing creature.`, { seat: p.seat }); this.checkState(); }
+    }
     discardWorst(p, n = 1, keepLands = false) {
       // discarding several cards is one event: "one or more land cards" (The Gitrog Monster) triggers once
       const batch = !this._landBatch; if (batch) this._landBatch = new Set();
@@ -2257,7 +2274,7 @@ function analyzeCard(data, deckColors, fullName) {
       if (fx.sevenNames && new Set(p.bf.filter((c) => c.info.isLand).map((c) => c.name)).size < 7) return;
       if (fx.ifColor && !(this._entering && this._entering.info.colors && this._entering.info.colors.has(fx.ifColor))) return;
       if (fx.nontoken && this._entering && this._entering.token) return;
-      const X = (v) => (v === 'X' ? Math.max(0, xVal) : v === 'X2' ? 2 * Math.max(0, xVal) : v === 'TRIBE' ? p.bf.filter((c) => c.info.isCreature && this.isType(c, fx.tribe)).length : v === 'D20' ? 1 + this.R.int(20) : v === 'SPELLS' ? (p.spellsThisTurn || 1) : v);
+      const X = (v) => (v === 'X' ? Math.max(0, xVal) : v === 'X2' ? 2 * Math.max(0, xVal) : v === 'TRIBE' ? p.bf.filter((c) => c.info.isCreature && this.isType(c, fx.tribe)).length : v === 'D20' ? 1 + this.R.int(20) : v === 'SPELLS' ? (p.spellsThisTurn || 1) : v === 'POWER' ? (src && src.zone === 'bf' ? Math.max(0, this.power(src)) : 0) : v);
       if (fx.unlessHave && p.bf.some((c) => this.isType(c, fx.unlessHave))) return;
       if (fx.ifArtifacts && p.bf.filter((c) => c.info.types.has('Artifact')).length < fx.ifArtifacts) return;
       switch (fx.k) {
@@ -2901,7 +2918,17 @@ function analyzeCard(data, deckColors, fullName) {
           break;
         }
         case 'wish': { const c = p.exile.filter((x) => x.info.types.has('Artifact') && !x.faceDown && x.owner === p.seat).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0]; if (c) { this.removeFrom(p.exile, c); c.zone = 'hand'; p.hand.push(c); this.emit('tutor', `${name} returns ${c.info.name} from exile to hand.`, { seat: p.seat, cards: [c.id] }); } break; }
-        case 'neutralize': { const t = this.bestOppTarget(p, (c) => !c.info.isLand && this.targetable(c, p)); if (t) { t.neutralized = this.turn + 99; t.neutralizedBy = p.seat; this.emit('effect', `${name}: ${t.info.name} can't deal or be dealt damage until ${p.name}'s next turn.`, { seat: p.seat, cards: [t.id] }); } break; }
+        case 'conniveAttacker': { // Raffine: the attacker that gains most from counters (evasive, or unblockable through Herald)
+          const atk = (this._attackersNow || []).filter((c) => c.zone === 'bf');
+          if (!atk.length) break;
+          const t = atk.slice().sort((x, y) => (this.hasKw(y, 'flying') || this.has(p, 'counterUnblockable') ? 3 : 0) + this.power(y) * 0.1 - ((this.hasKw(x, 'flying') || this.has(p, 'counterUnblockable') ? 3 : 0) + this.power(x) * 0.1))[0];
+          this.connive(p, t, atk.length);
+          break;
+        }
+        case 'countersKw': for (const c of p.bf) if (c.info.isCreature && c.p1 > 0) c.eot.kw.push(fx.kw); if (!quiet) this.emit('effect', `${name}: creatures with counters gain ${fx.kw}.`, { seat: p.seat }); break;
+        case 'millOpp': { const q = this.opps(p).sort((a, b) => a.library.length - b.library.length)[0]; const n = X(fx.n); if (q && n > 0) { this.mill(q, n); this.emit('effect', `${name}: ${q.name} mills ${n}.`, { seat: p.seat, target: q.seat }); } break; }
+        case 'untapLandsUpTo': { const ls = p.bf.filter((c) => c.info.isLand && c.tapped).sort((a, b) => this.landValue(p, b) - this.landValue(p, a)).slice(0, fx.n); for (const c of ls) c.tapped = false; if (ls.length && !quiet) this.emit('effect', `${name}: ${p.name} untaps ${ls.length} land${ls.length > 1 ? 's' : ''}.`, { seat: p.seat }); break; }
+        case 'neutralize': { const t = this.bestOppTarget(p, (c) => !c.info.isLand && this.targetable(c, p)); if (t) { t.neutralized = fx.short ? this.turn + this.alive().length : this.turn + 99; t.neutralizedBy = p.seat; this.emit('effect', `${name}: ${t.info.name} can't deal or be dealt damage until ${p.name}'s next turn.`, { seat: p.seat, cards: [t.id] }); } break; }
         case 'ebonLegion': { if (src && src.zone === 'bf' && this.players.some((q) => q.lostTurn === this.turn && q.lostThis >= 4)) src.p1 += this.counterAmount(p, 1); break; }
         case 'piles': {
           const q = this.opps(p).sort((a, b) => this.playerThreat(b) - this.playerThreat(a))[0]; if (!q) break;
@@ -3887,11 +3914,14 @@ function analyzeCard(data, deckColors, fullName) {
       }
     }
 
-    connive(q, s) {
-      this.emit('draw', `${s.info.name} connives.`, { seat: q.seat, cards: [s.id] });
-      this.draw(q, 1);
-      const d = q.hand.slice().sort((a, b) => this.cardValue(q, a) - this.cardValue(q, b))[0];
-      if (d) { this.discardCard(q, d); if (!d.info.isLand) s.p1 += this.counterAmount(q, 1); }
+    // connive n: draw n, discard n (the worst), a +1/+1 counter for each nonland card discarded
+    connive(q, s, n = 1) {
+      this.emit('draw', `${s.info.name} connives${n > 1 ? ' ' + n : ''}.`, { seat: q.seat, cards: [s.id] });
+      this.draw(q, n);
+      const ds = q.hand.slice().sort((a, b) => this.cardValue(q, a) - this.cardValue(q, b)).slice(0, n);
+      let nonland = 0;
+      for (const d of ds) { this.discardCard(q, d); if (!d.info.isLand) nonland++; }
+      if (nonland && s.zone === 'bf') s.p1 += this.counterAmount(q, nonland);
     }
 
     tryCounter(p, c) {
@@ -5065,6 +5095,7 @@ function analyzeCard(data, deckColors, fullName) {
       if (!b.info.isCreature || b.tapped || this.pacified(b) || b.noBlock || b.info.cantBlock) return false;
       const ak = this.kws(a);
       if (ak.has('unblockable') || ak.has('emissary')) return false;
+      if (a.p1 > 0 && this.has(this.P(a.ctrl), 'counterUnblockable')) return false; // Herald of Secret Streams
       if (ak.has('flying') && !this.hasKw(b, 'flying') && !this.hasKw(b, 'reach')) return false;
       if (ak.has('shadow') !== this.hasKw(b, 'shadow')) return false;
       if (ak.has('intimidate') && !b.info.types.has('Artifact') && ![...(b.info.colors || [])].some((x) => (a.info.colors || new Set()).has(x))) return false;
@@ -5342,8 +5373,18 @@ function analyzeCard(data, deckColors, fullName) {
           } else this.resolveEffects(p, [f], a, null, true);
         }
         for (const eq of p.bf) if (eq.attached === a.id && eq.info.attack && eq.info.attack.length) this.resolveEffects(p, eq.info.attack, eq, null, true);
+        // mobilize N: N 1/1 Warriors enter tapped and attacking, sacrificed at the end step
+        if (a.info.mobilize) {
+          const made = [];
+          for (let k = 0; k < a.info.mobilize * this.tokenMult(p); k++) { const t = this.makeToken(p, { p: 1, t: 1, sub: 'Warrior', colors: 'red' }); t.ctrl = p.seat; p.bf.push(t); t.tapped = true; t.attacking = true; t.enteredAttacking = this.turn; t.eotSac = true; attackers.push(t); atkInfo.push({ id: t.id, to: null }); made.push(t); }
+          this.emit('token', `${a.info.name} mobilizes: ${made.length} Warrior tokens join the attack.`, { seat: p.seat, cards: made.map((t) => t.id), attackers: atkInfo, target: q.seat });
+        }
         for (const src of [...p.bf]) for (const t of src.info.triggers) if (t.k === 'tribalAttack' && (a.info.subtypes || []).includes(t.sub)) this.resolveEffects(p, t.fx, src, null, false);
       }
+      // "whenever you attack": once per attack (Raffine's connive, Chocobo Knights)
+      this._attackersNow = attackers;
+      for (const src of [...p.bf]) for (const t of src.info.triggers) if (t.k === 'youAttack' && src.zone === 'bf') this.resolveEffects(p, t.fx, src, `${src.info.name} triggers`, false);
+      this._attackersNow = null;
       this.checkState();
       if (this.over) { attackers.forEach((a) => (a.attacking = false)); return; }
       // each defender blocks and takes damage from the creatures sent at them

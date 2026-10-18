@@ -113,6 +113,48 @@ export default [
       return { ok: m.p1 === -6, note: `counters ${m.p1}` };
     },
   },
+  // ---------- attacks ----------
+  {
+    card: 'Raffine, Scheming Seer', title: 'whenever you attack, an attacker connives X (X = attackers): draw X, discard X, counters for nonland discards',
+    wrong: '"whenever you attack" triggers did not exist, and connive only ever drew and discarded one',
+    run({ table, put, card }) {
+      const g = raffine(table); const [me, opp] = g.players; me.bf = me.bf.filter((c) => c.info.isLand); opp.bf = opp.bf.filter((c) => c.info.isLand); me.hand = [];
+      const r = put(g, me, 'Raffine, Scheming Seer'); const a = put(g, me, 'Generous Pup'); const b = put(g, me, 'Psychic Frog');
+      for (const c of [r, a, b]) c.sick = false;
+      me.library.unshift(...['Snuff Out', 'Reprieve', 'Swamp'].map((n) => { const c = g.makeCard(n, me, false); c.zone = 'library'; return c; }));
+      g.chooseDefender = () => opp; g.active = me.seat; g.phase = 'combat'; g._forcedAtk = { q: opp.seat, ids: [r.id, a.id, b.id] }; g.combat(me); g._forcedAtk = null;
+      const counters = [r, a, b].reduce((s2, c) => s2 + Math.max(0, c.p1), 0);
+      return { ok: me.cardsDrawn >= 3 && counters >= 2 && me.gy.length >= 3, note: `drew ${me.cardsDrawn}, counters ${counters}, graveyard ${me.gy.length}` };
+    },
+  },
+  {
+    card: 'Voice of Victory', title: 'mobilize 2: two 1/1 Warriors attack too, and are sacrificed at the end step',
+    wrong: 'mobilize was not read',
+    run({ table, put }) {
+      const g = raffine(table); const [me, opp] = g.players; me.bf = me.bf.filter((c) => c.info.isLand); opp.bf = opp.bf.filter((c) => c.info.isLand);
+      const v = put(g, me, 'Voice of Victory'); v.sick = false; const l0 = opp.life;
+      g.chooseDefender = () => opp; g.active = me.seat; g.phase = 'combat'; g._forcedAtk = { q: opp.seat, ids: [v.id] }; g.combat(me); g._forcedAtk = null;
+      const dealt = l0 - opp.life; g.restOfTurn(me, 'end');
+      return { ok: dealt >= g.power(v) + 2 && !me.bf.some((c) => c.token && /Warrior/.test(c.info.name)), note: `damage ${dealt} (Voice ${g.power(v)}); warriors left ${me.bf.filter((c) => c.token).length}` };
+    },
+  },
+  {
+    card: 'Herald of Secret Streams', title: 'creatures with +1/+1 counters can\'t be blocked',
+    wrong: 'its static was not read',
+    run({ table, put }) {
+      const g = raffine(table); const [me, opp] = g.players; put(g, me, 'Herald of Secret Streams'); const a = put(g, me, 'Generous Pup'); a.p1 = 1; const b = put(g, opp, 'Old Gnawbone');
+      return { ok: !g.canBlock(b, a), note: `Gnawbone can block it: ${g.canBlock(b, a)}` };
+    },
+  },
+  {
+    card: 'Archfiend of Ifnir', title: 'a discard puts a -1/-1 counter on each opposing creature',
+    wrong: 'its trigger was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const [me, opp] = g.players; put(g, me, 'Archfiend of Ifnir'); const t = put(g, opp, 'Vampire Nighthawk'); const d = card(g, me, 'Swamp', 'hand');
+      g.discardCard(me, d);
+      return { ok: t.p1 === -1, note: `Nighthawk counters ${t.p1}` };
+    },
+  },
   {
     card: 'Force of Negation', title: 'free (exile a blue card) only on an opponent\'s turn',
     wrong: '(regression guard for the general alternative-cost code)',
