@@ -111,6 +111,12 @@
     if ((m = l.match(/counter target (noncreature |creature |instant or sorcery |enchantment, instant, or sorcery |artifact or enchantment |activated or triggered ability|)spell/)) || /counter target spell/.test(l)) {
       const f = (m && m[1].trim()) || '';
       fx.push({ k: 'counter', filter: f });
+    } else if (/counter target instant spell, sorcery spell/.test(l)) fx.push({ k: 'counter', filter: 'instant or sorcery' }); // (Spider-Sense; triggered abilities aren't on a stack here)
+    else if (/counter target triggered ability or colorless spell/.test(l)) fx.push({ k: 'counter', filter: 'colorless' }); // (Consign to Memory)
+    else if ((m = l.match(/return target spell( or nonland permanent an opponent controls)? to its owner's hand/))) {
+      // Reprieve, Sink into Stupor: a "counter" that sends the spell back to hand; Sink can also bounce a permanent
+      fx.push({ k: 'counter', filter: '', bounce: true });
+      if (m[1]) fx.push({ k: 'removal', what: 'nonland', bounce: true });
     }
     // wipes
     if (/(destroy|exile) all creatures|destroy all nonland permanents|exile all nonland permanents|all creatures get -\d+\/-\d+|each creature gets -x\/-x|destroy all artifacts, creatures, and enchantments|(destroy|exile) all (artifacts|enchantments)|choose one or more —/.test(l) && /creature|nonland/.test(l)) {
@@ -293,6 +299,9 @@
     if (/each player gains control of all creatures they own/.test(l)) fx.push({ k: 'homeward' });
     if (/take two extra turns after this one/.test(l)) { fx.push({ k: 'extraTurn' }); fx.push({ k: 'extraTurn' }); }
     if (/prevent all combat damage that would be dealt this turn/.test(l)) fx.push({ k: 'fog' });
+    else if (/prevent all damage that sources of the color of your choice would deal this turn/.test(l)) fx.push({ k: 'fog', color: true }); // (Prismatic Strands: the attack's colour)
+    if (/^target player can't cast spells this turn/.test(l)) fx.push({ k: 'silence' }); // (Orim's Chant)
+    if (/^you and permanents you control gain hexproof until end of turn/.test(l)) fx.push({ k: 'protect' }); // (Dawn's Truce)
     if (/exile the top (\w+) cards of your library\. you may play them this turn/.test(l)) fx.push({ k: 'impulse', n: num(l.match(/exile the top (\w+) cards of your library\. you may play them this turn/)[1]) });
     if ((m = l.match(/add \{r\} for each card in target opponent's hand/))) fx.push({ k: 'jeska' });
     // which lands a search may find: "a Forest card", "a Plains, Island, Swamp, or Mountain card", "basic land", "land card"
@@ -3765,8 +3774,9 @@ function analyzeCard(data, deckColors, fullName) {
       if (countered || (!i.uncounterable && !cavern && this.tryCounter(p, c))) {
         if (c.isCommander) { c.zone = 'command'; p.command.push(c); }
         else if (this._counterExile) { c.zone = 'exile'; this.P(c.owner).exile.push(c); }
+        else if (this._counterBounce) { c.zone = 'hand'; this.P(c.owner).hand.push(c); }
         else this.toGraveyard(c, p.seat);
-        this._counterExile = false;
+        this._counterExile = false; this._counterBounce = false;
         return true;
       }
       if (i.isPermanent) {
@@ -3861,7 +3871,7 @@ function analyzeCard(data, deckColors, fullName) {
         for (const cs of q.hand) {
           const f = cs.info.spell.find((x) => x.k === 'counter');
           if (!f) continue;
-          const okType = !f.filter || (f.filter === 'noncreature' && !i.isCreature) || (f.filter === 'creature' && i.isCreature) || (f.filter.includes('instant') && (i.isInstant || i.isSorcery || (f.filter.includes('enchantment') && i.types.has('Enchantment'))));
+          const okType = !f.filter || (f.filter === 'colorless' && !(i.colors && i.colors.size)) || (f.filter === 'noncreature' && !i.isCreature) || (f.filter === 'creature' && i.isCreature) || (f.filter.includes('instant') && (i.isInstant || i.isSorcery || (f.filter.includes('enchantment') && i.types.has('Enchantment'))));
           if (!okType) continue;
           // the mana, or the alternative cost (free with a commander out; otherwise only when the mana isn't there)
           const canMana = this.pay(q, cs.info.cost);
@@ -3874,8 +3884,12 @@ function analyzeCard(data, deckColors, fullName) {
           else this.pay(q, cs.info.cost, 0, true);
           this.removeFrom(q.hand, cs); this.toGraveyard(cs, q.seat);
           this._counterExile = /exile it instead/i.test(cs.info.text);
+          this._counterBounce = !!f.bounce;
           this.credit(cs, 'countered', 1);
-          this.emit('counter', `${q.name} counters ${i.name} with ${cs.info.name}!`, { seat: q.seat, cards: [cs.id, c.id], target: p.seat });
+          this.emit('counter', f.bounce ? `${q.name} returns ${i.name} to ${this.P(c.owner).name}'s hand with ${cs.info.name}!` : `${q.name} counters ${i.name} with ${cs.info.name}!`, { seat: q.seat, cards: [cs.id, c.id], target: p.seat });
+          // the rest of the counterspell's text (Reprieve: draw a card); a bounce of a permanent is for casting it on its own
+          const rest = cs.info.spell.filter((x) => x.k !== 'counter' && !(x.k === 'removal' && x.bounce));
+          if (rest.length) this.resolveEffects(q, rest, cs, null, true);
           if (/mana drain/i.test(cs.info.name)) q.drainMana = (q.drainMana || 0) + (i.mv || 0);
           if (/its controller creates a 2\/2 blue bird/i.test(cs.info.text)) this.addToken(p, { p: 2, t: 2, sub: 'Bird', kw: ['flying'], colors: 'blue' }, 1, true);
           return true;
@@ -5312,6 +5326,11 @@ function analyzeCard(data, deckColors, fullName) {
         // a blocking Sakura-Tribe Elder that would die anyway is sacrificed for its value before damage
         if (!this.abolished(q, 'ability')) for (const [aid, bs] of blocks) for (const b of bs) { const ab = this.selfSacAb(b); if (ab && b.zone === 'bf' && this.power(this.cards[aid]) >= this.toughness(b)) this.doActivate(q, { c: b, ab, fodder: [], cost: ab.cost }); }
         if (frog && !this.abolished(q, 'ability') && (incoming >= q.life || incoming >= (this.has(q, 'muldrotha') ? 4 : 10))) { this.destroy(frog, 'sacrificed', true); this.fogTurn = this.turn; this.emit('response', `${q.name} sacrifices ${frog.info.name}: all combat damage this turn is prevented.`, { seat: q.seat, cards: [frog.id] }); }
+        // a fog from hand (Prismatic Strands) against a lethal or very big hit; cast like any spell (it can be countered)
+        if (this.fogTurn !== this.turn && !this.abolished(q) && (incoming >= q.life || incoming >= Math.max(12, q.life * 0.4))) {
+          const fogC = q.hand.find((c) => (c.info.isInstant || c.info.flash) && c.info.spell.some((f) => f.k === 'fog') && this.pay(q, this.costFor(q, c, 'hand')));
+          if (fogC) { this.emit('response', `${q.name} answers the attack with ${fogC.info.name}.`, { seat: q.seat, cards: [fogC.id] }); this.castSpell(q, fogC, 'hand'); }
+        }
         // Osgir: sacrifice artifacts for +2/+0 on an unblocked attacker when it gets there
         const osg = p.bf.find((c) => c.info.osgirPump);
         if (osg) {
