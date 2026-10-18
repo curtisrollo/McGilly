@@ -360,6 +360,7 @@
       if (low === 'gift' || /^gift/.test(low)) a.gift = true;
       if (low === 'web-slinging' && arg) a.altCost = { kind: 'webSling', mana: arg.replace(/[{}]/g, ' ').trim().toUpperCase() };
       if (low === 'evolve') a.evolve = true;
+      if (low === 'transmute' && arg) a.transmute = parseCost(arg);
       if (low === 'ward' && /^\d+$/.test(arg || '')) { a.wardMana = +arg; a.kw.add('ward'); }
       if (low === 'ravenous') { a.etbCounters = 'X'; a.ravenous = true; } // enters with X +1/+1 counters; X >= 5: draw a card
       if (low === 'mobilize') a.mobilize = +arg || 1;
@@ -608,7 +609,7 @@
     if (opts.length) a.mana = { opts, oneShot, dork: a.isCreature };
     if (a.isLand) a.unmodeled = a.unmodeled.filter((l) => !/enters tapped|you may pay [23] life|return a land you control to its owner.s hand|becomes tapped, it deals 1 damage/i.test(l));
     // lines whose keyword is implemented elsewhere (the keyword list / enterBattlefield)
-    const kwDone = [[a.delve, /^delve/i], [a.mobilize, /^mobilize/i], [a.ravenous, /^ravenous/i], [a.evolve, /^evolve/i], [a.miracle, /^miracle/i], [a.spree, /^spree/i], [true, /^replicate \{/i], [a.altCost && a.altCost.kind === 'webSling', /^web-slinging/i], [a.gift, /^gift a card/i], [a.etbMinus, /enters with (a|one|two|three|four|five|six|\w+) -1\/-1 counters? on it/i], [a.wardMana, /^(flying, )?ward \{\d+\}$/i]];
+    const kwDone = [[a.delve, /^delve/i], [a.mobilize, /^mobilize/i], [a.ravenous, /^ravenous/i], [a.evolve, /^evolve/i], [a.miracle, /^miracle/i], [a.spree, /^spree/i], [a.transmute, /^transmute/i], [true, /^replicate \{/i], [a.altCost && a.altCost.kind === 'webSling', /^web-slinging/i], [a.gift, /^gift a card/i], [a.etbMinus, /enters with (a|one|two|three|four|five|six|\w+) -1\/-1 counters? on it/i], [a.wardMana, /^(flying, )?ward \{\d+\}$/i]];
     a.unmodeled = a.unmodeled.filter((l) => !kwDone.some(([on, re]) => on && re.test(l)));
     if (a.isLand) {
       const lo = otext.toLowerCase();
@@ -641,6 +642,12 @@
     'Cephalid Coliseum': (a, cover) => { a.activated.push({ tap: true, sac: true, cost: parseCost('U'), threshold: 7, fx: [{ k: 'loot', draw: 3, n: 3 }], text: 'Threshold: draw three cards, then discard three.' }); cover(ALL); },
     'Psychic Frog': (a, cover) => { a.activated.push({ cost: parseCost(''), exileGy: 3, fx: [{ k: 'kwSelf', kw: 'flying' }], text: 'Exile three cards from your graveyard: gains flying until end of turn.' }); cover(/^Exile three cards from your graveyard/i); },
     'Liliana the Repentant': (a, cover) => { (a.myCreatureEtb = a.myCreatureEtb || []).push([{ k: 'mill', n: 2 }]); a.activated.push({ cost: parseCost('5 B'), sorcery: true, exhaust: true, exhaustCounter: true, fx: [{ k: 'reanimate', any: false }], text: 'Exhaust: return a creature card from your graveyard to the battlefield; a +1/+1 counter on Liliana.' }); cover(ALL); },
+    'Ainok Strike Leader': (a, cover) => { a.tokenShield = true; cover(/^Sacrifice CARDNAME: Creature tokens you control gain indestructible/i); },
+    'Bruna, the Fading Light': (a, cover) => { a.castSelf = [{ k: 'reanimate', subs: ['Angel', 'Human'] }]; cover(/^When you cast CARDNAME/i); },
+    'Gisela, the Broken Blade': (a, cover) => { a.meldWith = 'Bruna, the Fading Light'; cover(/^At the beginning of your end step, if you both own and control/i); },
+    'Brisela, Voice of Nightmares': (a, cover) => { a.statics.push({ k: 'brisela' }); a.mv = 11; cover(ALL); },
+    'Grim Hireling': (a, cover) => { a.activated.push({ cost: parseCost('B'), sorcery: true, fx: [{ k: 'hireling' }], text: '{B}, Sacrifice X Treasures: Target creature gets -X/-X until end of turn.' }); cover(/^\{B\}, Sacrifice X Treasures/i); },
+    'Hydroelectric Specimen': (a, cover) => { a.specimen = true; cover(/^When CARDNAME enters, you may change a target/i); },
     'Guide of Souls': (a, cover) => { a.myCreatureEtb = [[{ k: 'gain', n: 1 }, { k: 'energy', n: 1 }]]; a.triggers.push({ k: 'youAttack', fx: [{ k: 'guideAngel' }] }); cover(ALL); },
     'The Queen of Dale': (a, cover) => { a.triggers.push({ k: 'queenRecruit' }); cover(ALL); },
     'Disciple of Deceit': (a, cover) => { a.inspiredTutor = true; a.statics = a.statics.filter((x) => x.k !== 'misc'); cover(ALL); },
@@ -1446,6 +1453,7 @@ function analyzeCard(data, deckColors, fullName) {
       if (c.attached && c.info.reanimAura) {
         const tgt = this.cards[c.attached]; if (tgt && tgt.zone === 'bf') this.destroy(tgt, 'sacrificed', true);
       }
+      if (c.meldPartner != null) { (this._meldFollow = this._meldFollow || []).push(c); }
       if (c.uginCard != null) { const x = this.cards[c.uginCard]; c.uginCard = null; const o = x && this.P(x.owner); if (x && x.zone === 'exile' && o.exile.includes(x)) { this.removeFrom(o.exile, x); x.zone = 'hand'; x.faceDown = false; o.hand.push(x); this.emit('draw', `The Spirit leaves: ${o.name} puts the card Ugin exiled into their hand.`, { seat: o.seat, cards: [c.id] }); } }
       c.attached = null; c.tapped = false; c.p1 = 0; c.dmg = 0; c.dt = false; c.eot = { p: 0, t: 0, kw: [] }; c.ctrl = c.owner; c.loyalty = 0; c.indestructibleEOT = false; c.hexproofEOT = false;
       c.copiedFrom = null; c.copyPlusOne = false; c.indCounter = false; c.neutralized = 0; c.frozenUntil = 0; c.charge = 0; c.harnessed = false; c.transformed = false; c.chosenType = null; c.age = 0; c.prepared = false; c.animatedBy = null; c.hallHaste = false;
@@ -1880,6 +1888,14 @@ function analyzeCard(data, deckColors, fullName) {
       if (n) this.emit('combo', `${p.name} sacrifices ${n} creature${n > 1 ? 's' : ''} to ${outlet.info.name}; the death triggers drain the table.`, { seat: p.seat, cards: [outlet.id] });
     }
     // In response to a wipe, cash in creatures that are about to die anyway
+    // Ainok Strike Leader: sacrificed in response, the creature tokens gain indestructible (worth it when they're worth more)
+    tokenShield(q) {
+      const ak = q.bf.find((c) => c.info.tokenShield); if (!ak || this.abolished(q, 'ability')) return;
+      const toks = q.bf.filter((x) => x.token && x.info.isCreature && x !== ak && !this.hasKw(x, 'indestructible'));
+      if (toks.length < 2 || toks.reduce((n, x) => n + this.permValue(x), 0) <= this.permValue(ak)) return;
+      this.emit('response', `${q.name} sacrifices ${ak.info.name}: their creature tokens gain indestructible.`, { seat: q.seat, cards: [ak.id] });
+      this.destroy(ak, 'sacrificed', true); for (const x of toks) x.indestructibleEOT = true;
+    }
     sacBeforeWipe(q) {
       const mon = q.bf.find((c) => c.info.mondrak && !c.indCounter);
       if (mon && this.pay(q, parseCost('1 W W'))) {
@@ -2523,9 +2539,17 @@ function analyzeCard(data, deckColors, fullName) {
           if (lands.length) this.emit('effect', `${p.name} returns ${lands.length} lands to hand.`, { seat: p.seat });
           break;
         }
+        case 'hireling': {
+          const t = this.hirelingTarget(p); if (!t) break;
+          const x = this.toughness(t); const tr = p.bf.filter((y) => y.token && this.isSubtype(y, 'Treasure')).slice(0, x);
+          for (const y of tr) this.destroy(y, 'sacrificed', true);
+          t.eot.p -= x; t.eot.t -= x;
+          this.emit('removal', `${name}: ${p.name} sacrifices ${x} Treasure${x === 1 ? '' : 's'}; ${this.cname(t)} gets -${x}/-${x}.`, { seat: p.seat, cards: [t.id], target: t.ctrl });
+          this.checkState(); break;
+        }
         case 'reanimate': {
           const pools = fx.any ? this.alive().flatMap((q) => q.gy) : p.gy;
-          const c = pools.filter((x) => (fx.perm ? x.info.isPermanent && x.info.mv <= fx.mvMax && (!x.info.isLand || fx.lands) : x.info.isCreature) && !x.isCommander && (!fx.loseMv || this.canPayLife(p, x.info.mv))).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0];
+          const c = pools.filter((x) => (fx.perm ? x.info.isPermanent && x.info.mv <= fx.mvMax && (!x.info.isLand || fx.lands) : x.info.isCreature) && !x.isCommander && (!fx.subs || fx.subs.some((t) => this.isType(x, t))) && (!fx.loseMv || this.canPayLife(p, x.info.mv))).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0];
           if (c) {
             this.removeFrom(this.P(c.owner).gy, c);
             if (src && src.info.reanimAura && src.zone === 'bf') src.attached = c.id;
@@ -3129,6 +3153,7 @@ function analyzeCard(data, deckColors, fullName) {
       const victims = [], hits = [];
       const prot = new Set();
       if (fx.what !== 'lands' && fx.what !== 'big') for (const q of this.alive()) if (!prot.has(q.seat)) this.sacBeforeWipe(q);
+      if (!fx.exile && ['creatures', 'farewell', 'nonland', 'damage', 'ugin', 'mv2', 'big'].includes(fx.what)) for (const q of this.alive()) this.tokenShield(q);
       for (const q of this.alive()) if (q !== p && this.tryProtect(q, q.bf.filter((c) => c.info.isCreature || fx.what === 'nonland'), p, true)) prot.add(q.seat);
       for (const q of this.alive()) {
         if (q.protectedUntil >= this.turn) continue; // Teferi's Protection: phased out
@@ -3233,7 +3258,17 @@ function analyzeCard(data, deckColors, fullName) {
     redirectRemoval(owner, caster, tgt, src) {
       if (owner === caster || this.abolished(owner) || this.permValue(tgt) < 7) return false;
       const card = owner.hand.find((c) => c.info.redirect && ((c.info.freeIfCommander && owner.bf.some((x) => x.isCommander)) || this.pay(owner, c.info.cost)));
-      if (!card) return false;
+      if (!card) {
+        // Hydroelectric Specimen: flashed in, it changes a single-target instant or sorcery's target to itself
+        const sp = src && (src.info.isInstant || src.info.isSorcery) && owner.hand.find((c) => c.info.specimen && !this.briselaLock(owner, c) && this.pay(owner, c.info.cost));
+        if (!sp || this.permValue(tgt) < this.permValue(sp) + 4) return false;
+        this.pay(owner, sp.info.cost, 0, true); this.removeFrom(owner.hand, sp);
+        this.emit('response', `${owner.name} flashes in ${sp.info.name} and changes the target to it!`, { seat: owner.seat, cards: [sp.id, tgt.id] });
+        this.enterBattlefield(sp, owner, {});
+        const f = (src.info.spell || []).find((x) => x.k === 'removal');
+        if (f && sp.zone === 'bf') { if (f.exile) this.exileCard(sp); else if (f.bounce) this.bounce(sp); else this.destroy(sp); }
+        return true;
+      }
       if (!(card.info.freeIfCommander && owner.bf.some((x) => x.isCommander))) this.pay(owner, card.info.cost, 0, true);
       if (/pay 5 life or pay \{2\}/i.test(card.info.text || '')) { if (this.canPayLife(owner, 5)) this.loseLife(owner, 5); }
       this.discardCard(owner, card);
@@ -3282,6 +3317,14 @@ function analyzeCard(data, deckColors, fullName) {
       return true;
     }
 
+    // Brisela, Voice of Nightmares: q's opponents can't cast spells with mana value 3 or less
+    // Grim Hireling: the best opposing creature that the Treasures on hand can shrink to death
+    hirelingTarget(p) {
+      const n = p.bf.filter((x) => x.token && this.isSubtype(x, 'Treasure')).length;
+      return this.opps(p).flatMap((q) => q.bf).filter((x) => x.info.isCreature && this.targetable(x, p) && this.toughness(x) <= n && this.creatureValue(x) >= 6).sort((a, b) => this.creatureValue(b) - this.creatureValue(a))[0] || null;
+    }
+    transmuteFind(p, c) { return p.library.filter((x) => !x.info.isLand && (x.info.mv || 0) === (c.info.mv || 0)).sort((a, b) => this.cardValue(p, b) - this.cardValue(p, a))[0] || null; }
+    briselaLock(q, c) { return !c.info.isLand && (c.info.mv || 0) <= 3 && this.opps(q).some((o) => this.has(o, 'brisela')); }
     abolished(q, kind = 'spell') {
       // Grand Abolisher: q can't cast spells or activate abilities during the active player's turn
       const act = this.P(this.active);
@@ -3544,6 +3587,13 @@ function analyzeCard(data, deckColors, fullName) {
       }
     }
     checkState() {
+      // a melded card left: its partner goes along to the same zone
+      if (this._meldFollow && this._meldFollow.length) for (const c of this._meldFollow.splice(0)) {
+        const b = this.cards[c.meldPartner]; c.meldPartner = null; const o = b && this.P(b.owner);
+        if (!b || b.zone !== 'exile' || !o.exile.includes(b) || c.zone === 'exile' || c.zone === 'bf') continue;
+        this.removeFrom(o.exile, b); b.zone = c.zone;
+        if (c.zone === 'gy') o.gy.push(b); else if (c.zone === 'hand') o.hand.push(b); else if (c.zone === 'library') o.library.splice(Math.max(0, o.library.indexOf(c)) + 1, 0, b); else { b.zone = 'exile'; o.exile.push(b); }
+      }
       this.refreshAnimations();
       let changed = true, guard = 0;
       while (changed && guard++ < 20) {
@@ -3601,10 +3651,11 @@ function analyzeCard(data, deckColors, fullName) {
       const drannith = this.opps(p).some((q) => this.has(q, 'drannith'));
       // Ethersworn Canonist: one nonartifact spell per turn
       const canonist = this.alive().some((q) => this.has(q, 'canonist')) && p.nonArtifactSpells >= 1;
-      const ok = (c) => !canonist || c.info.types.has('Artifact');
+      const ok = (c) => (!canonist || c.info.types.has('Artifact')) && !this.briselaLock(p, c);
       const cmd = p.command[0];
       for (const c of p.hand) if (!c.info.isLand && ok(c)) out.push({ c, from: 'hand' });
       for (const c of p.hand) if (c.info.channel && ok(c)) out.push({ c, from: 'channel' });
+      if (this.active === p.seat) for (const c of p.hand) if (c.info.transmute) out.push({ c, from: 'transmute' });
       for (const c of p.hand) if (c.info.dash && ok(c)) out.push({ c, from: 'dash' });
       if (!drannith) for (const c of p.gy) if (c.info.flashback && ok(c)) out.push({ c, from: 'flashback' });
       for (const c of p.bf) if (c.info.prepared && c.prepared && !drannith) out.push({ c, from: 'prepared' });
@@ -3665,6 +3716,7 @@ function analyzeCard(data, deckColors, fullName) {
     costFor(p, c, from, normal = false) {
       if (from === 'citadel' || from === 'valgavoth') return parseCost('');
       if (from === 'miracle') return c.info.miracle;
+      if (from === 'transmute') return c.info.transmute;
       if (from === 'prepared') return parseCost(c.info.prepared.cost);
       if (from === 'channel') { const leg = p.bf.filter((x) => x.info.isCreature && x.info.isLegendary).length; const cc = c.info.channel.cost; return { ...cc, generic: Math.max(0, cc.generic - leg), mv: Math.max(cc.mv - cc.generic, cc.mv - leg) }; }
       if (!normal && c.info.altCost && this.altChosen(p, c, from)) return parseCost(''); // (paid in castSpell / tryProtect / counter responses)
@@ -3830,6 +3882,7 @@ function analyzeCard(data, deckColors, fullName) {
       if (from === 'channel' && i.channel.fx.some((f) => f.k === 'regrowType')) { const best = Math.max(0, ...p.gy.filter((x) => x.info.isCreature || x.info.isPW).map((x) => this.cardValue(p, x))); if (best < 8 || p.hand.filter((x) => x.info.isLand).length + p.bf.filter((x) => x.info.isLand).length < 6) return -1; s = 8 + best; }
       else if (from === 'channel') { const f = i.channel.fx[0]; if (!f) return -1; const t = this.bestOppTarget(p, (x) => (f.what === 'artench' ? (x.info.types.has('Artifact') || x.info.types.has('Enchantment')) : !x.info.isLand) && this.targetable(x, p)); if (!t || this.permValue(t) < 8 || p.hand.filter((x) => x.info.isLand).length + p.bf.filter((x) => x.info.isLand).length < 5) return -1; s = 10 + this.permValue(t); }
       if (from === 'prepared') s = 30;
+      if (from === 'transmute') { const t = this.transmuteFind(p, c); if (!t) return -1; const gain = this.cardValue(p, t) - this.cardValue(p, c); if (gain < 3) return -1; s = 4 + gain; }
       if (!this.payAdditional(p, c, false)) return -1;
       if (!i.isPermanent && fx.length === 0) s = 1; // unmodeled spell: cast it last
       // the neural network's opinion: how much casting this now moves our chance to win
@@ -3850,6 +3903,7 @@ function analyzeCard(data, deckColors, fullName) {
 
     castSpell(p, c, from, gyType) {
       const i = c.info;
+      if (from !== 'channel' && from !== 'transmute' && this.briselaLock(p, c)) return false;
       const sample = this.collect ? this.nnSample(p, c, from) : null;
       let cost = this.costFor(p, c, from);
       const delveN = i.delve ? c._delveN || 0 : 0;
@@ -3861,6 +3915,13 @@ function analyzeCard(data, deckColors, fullName) {
         c.prepared = false;
         this.emit('cast', `${p.name} casts ${i.prepared.name} from the prepared ${i.name}.`, { seat: p.seat, cards: [c.id] });
         this.resolveEffects(p, i.prepared.fx, c, null, false);
+        return true;
+      }
+      if (from === 'transmute') {
+        // transmute: discard it and search for a card with the same mana value (sorcery speed)
+        const pick = this.transmuteFind(p, c); if (!pick || !this.pay(p, cost, 0, true)) return false;
+        this.discardCard(p, c); this.searched(p); this.removeFrom(p.library, pick); pick.zone = 'hand'; p.hand.push(pick); this.R.shuffle(p.library);
+        this.emit('tutor', `${p.name} transmutes ${i.name} for ${pick.info.name}.`, { seat: p.seat, cards: [c.id, pick.id] });
         return true;
       }
       if (from === 'channel') {
@@ -3955,6 +4016,7 @@ function analyzeCard(data, deckColors, fullName) {
 
     castTriggers(p, c, from) {
       const i = c.info;
+      if (i.castSelf) this.resolveEffects(p, i.castSelf, c, null, true); // "when you cast this spell" (Bruna)
       if (from === 'gy') for (const s of p.bf) for (const t of s.info.triggers) if (t.k === 'gyCast') this.resolveEffects(p, t.fx, s, null, true);
       if (i.isCreature) for (const b of p.bf) if (b.info.banner && b.chosenType && this.isType(c, b.chosenType)) { this.draw(p, 1); this.emit('draw', `Vanquisher's Banner: ${p.name} draws a card.`, { seat: p.seat, cards: [b.id] }); }
       // Ledger Shredder: whenever a player casts their second spell each turn
@@ -4030,7 +4092,7 @@ function analyzeCard(data, deckColors, fullName) {
         }
         for (const cs of q.hand) {
           const f = cs.info.spell.find((x) => x.k === 'counter');
-          if (!f) continue;
+          if (!f || this.briselaLock(q, cs)) continue;
           const okType = !f.filter || (f.filter === 'colorless' && !(i.colors && i.colors.size)) || (f.filter === 'noncreature' && !i.isCreature) || (f.filter === 'creature' && i.isCreature) || (f.filter.includes('instant') && (i.isInstant || i.isSorcery || (f.filter.includes('enchantment') && i.types.has('Enchantment'))));
           if (!okType) continue;
           // the mana, or the alternative cost (free with a commander out; otherwise only when the mana isn't there)
@@ -4343,6 +4405,7 @@ function analyzeCard(data, deckColors, fullName) {
       // cards exiled "until end of turn you may play" that weren't played go away
       for (const c of [...p.hand]) if (c.impulseTurn === this.turn) { this.removeFrom(p.hand, c); c.zone = 'exile'; p.exile.push(c); c.impulseTurn = null; }
       if (p.necroPending && p.necroPending.length) { for (const c of p.necroPending) { c.zone = 'hand'; p.hand.push(c); } p.necroPending = []; }
+      this.checkState(); // (what dies in the end step, and draws off it, happens before cleanup)
       // cleanup
       const max = this.has(p, 'noMaxHand') || (p.emblems || []).includes('tamiyo') ? 99 : 7;
       // a discarded land can draw a card (The Gitrog Monster) and cleanup repeats: after the first pass, discard spells so it ends at seven
@@ -4353,6 +4416,8 @@ function analyzeCard(data, deckColors, fullName) {
         if (c.animatedEOT) { c.animatedEOT = false; this.restoreInfo(c); }
       }
       this.checkState();
+      // something happened during cleanup (a creature died as "until end of turn" ended and drew a card): another cleanup step
+      for (let i = 0; i < 8 && p.hand.length > max && !p.lost; i++) this.discardWorst(p, p.hand.length - max, landDraws && i > 0);
     }
 
     // The Wandering Emperor (flash): the defending player flashes her in mid-combat and exiles the best tapped attacker with her -2
@@ -4369,6 +4434,13 @@ function analyzeCard(data, deckColors, fullName) {
 
     // "At the beginning of the next end step": Teferi, Hero of Dominaria's +1 untaps lands, Oath of Teferi returns what it exiled
     endStepDelayed(p) {
+      // meld (Gisela + Bruna -> Brisela): both owned and controlled; the partner waits in exile and follows Brisela when it leaves
+      for (const gi of p.bf.filter((c) => c.info.meldWith && c.owner === p.seat && !c.transformed)) {
+        const br = p.bf.find((x) => x.info.name === gi.info.meldWith && x.owner === p.seat); if (!br) continue;
+        this.leaveBattlefield(br); this.removeFrom(p.bf, br); br.zone = 'exile'; p.exile.push(br);
+        gi.dmg = 0; gi.tapped = false; this.transform(gi); gi.meldPartner = br.id;
+        this.emit('effect', `${p.name} melds ${gi.baseInfo ? gi.baseInfo.name : 'Gisela'} and ${br.info.name} into ${gi.info.name}!`, { seat: p.seat, cards: [gi.id, br.id] });
+      }
       if (p.endUntap) { let n = p.endUntap; p.endUntap = 0; for (const c of p.bf) if (n > 0 && c.info.isLand && c.tapped) { c.tapped = false; n--; } }
       if (p.oathReturn && p.oathReturn.length) { for (const c of p.oathReturn) if (c.zone === 'exile') { this.removeFrom(this.P(c.owner).exile, c); this.enterBattlefield(c, this.P(c.owner)); this.emit('effect', `${c.info.name} returns to the battlefield (Oath of Teferi).`, { seat: c.owner, cards: [c.id] }); } p.oathReturn = []; }
     }
@@ -4712,6 +4784,7 @@ function analyzeCard(data, deckColors, fullName) {
           case 'osgir': return p.gy.some((x) => x.info.types.has('Artifact') && x.info.isPermanent && x.info.mv <= this.availableMana(p));
           case 'reanimateArtifact': return p.gy.some((x) => x.info.types.has('Artifact'));
           case 'reanimate': return p.gy.some((x) => x.info.isCreature && this.cardValue(p, x) > 4); // (Liliana the Repentant's exhaust)
+          case 'hireling': return !!this.hirelingTarget(p);
           case 'weld': { const best = Math.max(-1, ...p.gy.filter((x) => x.info.types.has('Artifact') && x.info.isPermanent).map((x) => this.cardValue(p, x))); const worst = Math.min(99, ...p.bf.filter((x) => x.info.types.has('Artifact') && x !== c).map((x) => this.permValue(x))); return best > worst + 1; }
           case 'regrowTop': return p.gy.some((x) => x.info.types.has(cap(f.what)));
           case 'cheatCreature': return p.hand.some((x) => x.info.isCreature && x.info.mv >= 5);

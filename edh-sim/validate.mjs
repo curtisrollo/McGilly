@@ -154,7 +154,7 @@ const EXPECT = {
   winIfArtifacts: () => true, vraskaShield: (a, b) => b.me.shields > a.me.shields, noop: () => true, tamiyoWatch: () => true, protect: () => true, counter: () => true,
   extraCombat: () => true, cheatAttack: () => true, pacify: () => true, scry: () => true, homeward: () => true,
 };
-const CONDITIONAL = new Set(['sacLand', 'weld', 'sorinSac', 'junji', 'animateArtifact', 'balefire', 'lordOfVoid', 'ragavan', 'stealArtifacts', 'edictThat', 'millPower', 'winIfArtifacts', 'archfiend', 'ebonLegion', 'coffin', 'defenseOfHeart', 'squirrelKill', 'castVoid', 'gixExile', 'fateseal', 'untapLands', 'untapLandsN', 'untapCreature', 'extraLandNow', 'noop', 'protect', 'counter', 'extraCombat', 'cheatAttack', 'pacify']);
+const CONDITIONAL = new Set(['hireling', 'sacLand', 'weld', 'sorinSac', 'junji', 'animateArtifact', 'balefire', 'lordOfVoid', 'ragavan', 'stealArtifacts', 'edictThat', 'millPower', 'winIfArtifacts', 'archfiend', 'ebonLegion', 'coffin', 'defenseOfHeart', 'squirrelKill', 'castVoid', 'gixExile', 'fateseal', 'untapLands', 'untapLandsN', 'untapCreature', 'extraLandNow', 'noop', 'protect', 'counter', 'extraCombat', 'cheatAttack', 'pacify']);
 
 // ---------- run one check ----------
 const results = [];

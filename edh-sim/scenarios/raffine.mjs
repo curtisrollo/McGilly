@@ -130,6 +130,77 @@ export default [
       return { ok: n1 === n0 + 1, note: `creatures ${n0} -> ${n1}` };
     },
   },
+  // ---------- the last six ----------
+  {
+    card: 'Ainok Strike Leader', title: 'sacrificed in response to a wipe, so the creature tokens survive',
+    wrong: 'its sacrifice ability was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const [me, opp] = g.players; put(g, me, 'Ainok Strike Leader');
+      const toks = []; for (let i = 0; i < 3; i++) toks.push(g.addToken(me, { p: 2, t: 2, sub: 'Soldier', colors: 'white' }, 1, true));
+      const t = me.bf.filter((c) => c.token && c.info.isCreature);
+      const w = card(g, opp, 'Damnation', 'hand'); g.resolveEffects(opp, w.info.spell, w, null, false);
+      const left = me.bf.filter((c) => c.token && c.info.isCreature).length;
+      return { ok: t.length === 3 && left === 3, note: `tokens ${t.length} -> ${left}` };
+    },
+  },
+  {
+    card: 'Bruna, the Fading Light', title: 'cast, it returns an Angel or Human from the graveyard (not another type)',
+    wrong: 'its cast trigger was not read',
+    run({ table, card }) {
+      const g = raffine(table); const me = g.players[0]; me.gy = [];
+      const gi = card(g, me, 'Gisela, the Broken Blade', 'gy'); const ar = card(g, me, 'Archfiend of Ifnir', 'gy'); const b = card(g, me, 'Bruna, the Fading Light', 'hand');
+      g.castTriggers(me, b, 'hand');
+      return { ok: gi.zone === 'bf' && ar.zone === 'gy', note: `Gisela ${gi.zone}, Archfiend ${ar.zone}` };
+    },
+  },
+  {
+    card: 'Gisela, the Broken Blade', title: 'with Bruna, melds into Brisela at end step; opponents then can\'t cast cheap spells; Brisela dying takes both cards to the graveyard',
+    wrong: 'the meld was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const [me, opp] = g.players; const gi = put(g, me, 'Gisela, the Broken Blade'); const br = put(g, me, 'Bruna, the Fading Light');
+      g.endStepDelayed(me);
+      const melded = gi.info.name === 'Brisela, Voice of Nightmares' && br.zone === 'exile' && g.power(gi) === 9;
+      const dt = card(g, opp, 'Demonic Tutor', 'hand'); const locked = !g.castables(opp).some((x) => x.c === dt);
+      g.destroy(gi); g.checkState();
+      return { ok: melded && locked && gi.zone === 'gy' && br.zone === 'gy', note: `melded ${melded}; Demonic Tutor locked ${locked}; after it dies: Gisela ${gi.zone}, Bruna ${br.zone}` };
+    },
+  },
+  {
+    card: 'Grim Hireling', title: 'sacrifices as many Treasures as it takes to shrink the best creature to death',
+    wrong: 'its {B}, sacrifice X Treasures ability was not read',
+    run({ table, put }) {
+      const g = raffine(table); const [me, opp] = g.players; const h = put(g, me, 'Grim Hireling'); put(g, me, 'Swamp');
+      for (const c of me.bf) if (c.info.isLand) c.tapped = false;
+      g.addToken(me, { treasure: true }, 4, true);
+      const gn = put(g, opp, 'Vampire Nighthawk'); const tg = g.toughness(gn);
+      const ab = h.info.activated.find((x) => x.fx.some((f) => f.k === 'hireling')); const prep = ab && g.prepareAbility(me, h, ab, false); if (prep) g.doActivate(me, prep);
+      const tr = me.bf.filter((c) => c.token && c.info.name === 'Treasure').length;
+      return { ok: gn.zone !== 'bf' && tr === 4 - tg, note: `Vampire Nighthawk (toughness ${tg}) ${gn.zone}; Treasures left ${tr}` };
+    },
+  },
+  {
+    card: 'Hydroelectric Specimen', title: 'flashed in, it takes a removal spell aimed at something better',
+    wrong: 'its target-changing trigger was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const [me, opp] = g.players; me.hand = []; const sp = card(g, me, 'Hydroelectric Specimen // Hydroelectric Laboratory', 'hand');
+      for (const c of me.bf) if (c.info.isLand) c.tapped = false; const big = put(g, me, 'Archon of Cruelty');
+      const sw = card(g, opp, 'Swords to Plowshares', 'hand'); g.active = opp.seat;
+      const red = g.redirectRemoval(me, opp, big, sw);
+      return { ok: red && big.zone === 'bf' && sp.zone !== 'hand' && sp.zone !== 'bf', note: `redirected ${red}; Archon ${big.zone}; Specimen ${sp.zone}` };
+    },
+  },
+  {
+    card: 'Muddle the Mixture', title: 'transmutes (discard it, find a better two-mana card) on its own turn only',
+    wrong: 'transmute was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const [me, opp] = g.players; me.hand = []; const m = card(g, me, 'Muddle the Mixture', 'hand');
+      for (const c of me.bf) if (c.info.isLand) c.tapped = false;
+      g.active = opp.seat; const theirs = g.castables(me).some((x) => x.from === 'transmute');
+      g.active = me.seat; const mine = g.castables(me).some((x) => x.from === 'transmute');
+      const pick = g.transmuteFind(me, m); const done = g.castSpell(me, m, 'transmute');
+      return { ok: !theirs && mine && done && m.zone === 'gy' && !!pick && me.hand.includes(pick) && (pick.info.mv || 0) === 2, note: `on their turn ${theirs}, on mine ${mine}; found ${pick && pick.info.name} (mana value ${pick && pick.info.mv})` };
+    },
+  },
   // ---------- spells that target spells ----------
   {
     card: 'Reprieve', title: 'returns an opponent\'s spell to their hand, and draws a card',
