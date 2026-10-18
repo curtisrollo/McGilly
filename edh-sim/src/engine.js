@@ -281,6 +281,10 @@
     if (/destroy each nonland permanent with mana value 2 or less/.test(l)) fx.push({ k: 'wipe', what: 'mv2' });
     if (/all creatures get -x\/-x until end of turn/.test(l)) fx.push({ k: 'wipe', what: 'minusX' });
     if (/put all creature cards from all graveyards onto the battlefield under your control/.test(l)) fx.push({ k: 'massReanimate' });
+    if ((m = l.match(/return all creature cards with mana value (\d+) or less from your graveyard to the battlefield/))) fx.push({ k: 'massReanimate', own: true, mvMax: +m[1] }); // (Raise the Past)
+    if ((m = l.match(/search your library for up to (one|two|three|\d+) creature cards?, put (?:them|it) into your graveyard/))) fx.push({ k: 'search', n: num(m[1]), what: 'creature', dest: 'gy' }); // (Buried Alive)
+    if (/each player exiles all creature cards from their graveyard, then sacrifices all creatures they control/.test(l)) fx.push({ k: 'livingDeath' });
+    if (/choose two target creature cards in your graveyard\. sacrifice a creature/.test(l)) fx.push({ k: 'victimize' });
     if ((m = l.match(/(?:up to one )?target creature(?: you control)? gets \+(\d+)\/\+(\d+)(?: and gains ([a-z ,]+?))? until end of turn/))) fx.push({ k: 'pump', p: +m[1], t: +m[2], kw: [...findKeywords(m[3] || '')] });
     else if ((m = l.match(/(?:another |up to one )?target creature(?: you control)? (?:gains|has) ([a-z ,]+?) until end of turn/))) fx.push({ k: 'pump', p: 0, t: 0, kw: [...findKeywords(m[1])] });
     if ((m = l.match(/target creature gets \+(\d+)\/\+0 and gains ([a-z ,]+?) until end of turn/))) fx.push({ k: 'pump', p: +m[1], t: 0, kw: [...findKeywords(m[2])] });
@@ -344,10 +348,11 @@
       if (low === 'equip') a.equip = parseCost(arg);
       if (low === 'overload') a.overload = parseCost(arg);
       if (low === 'dash') a.dash = parseCost(arg);
+      if (low === 'delve') a.delve = true;
       if (low === 'flashback' && /^[\dWUBRGC ]+$/.test(arg || '')) a.flashback = parseCost(arg);
       if (low === 'cycling' && /^[\dWUBRGC ]+$/.test(arg || '')) a.cycling = parseCost(arg);
       if (low.startsWith('protection')) a.kw.add('protection');
-      if (low === 'etbcounter') { const parts = k.split(':'); if (parts[1] === 'P1P1') a.etbCounters = parts[2] === 'X' ? 'X' : +parts[2]; }
+      if (low === 'etbcounter') { const parts = k.split(':'); if (parts[1] === 'P1P1') a.etbCounters = parts[2] === 'X' ? 'X' : +parts[2]; if (parts[1] === 'M1M1') a.etbMinus = +parts[2] || 1; }
       if (low === 'infect') a.kw.add('infect');
     }
     const text = cleanText(face.oracle || '', face.name);
@@ -512,6 +517,7 @@
         if (/^ward—sacrifice/.test(low)) a.wardSac = true;
         if (/^ward \{(\d+)\}/.test(low)) a.wardMana = +low.match(/^ward \{(\d+)\}/)[1];
         if (/^convoke/.test(low)) a.convoke = true;
+        if (/^delve/.test(low)) a.delve = true;
         if (/^ward/.test(low)) a.kw.add('ward');
         if (/^undying/.test(low)) a.kw.add('undying');
         if (/^persist/.test(low)) a.kw.add('persist');
@@ -602,6 +608,7 @@
   // and `cover` marks which rules-text lines it accounts for (the audit uses this).
   const ALL = /./;
   const SCRIPTS = {
+    'Wonder': (a, cover) => { a.gyFlyIsland = true; cover(ALL); }, // (from the graveyard with an Island out: our creatures fly; see _kws)
     'Academy Rector': (a, cover) => { a.dies = [{ k: 'rectorExile' }, { k: 'search', n: 1, what: 'enchantment', dest: 'bf', needsRector: true }]; cover(/dies/); },
     'Sun Titan': (a, cover) => { a.etb = [{ k: 'reanimate', any: false, mvMax: 3, perm: true, lands: true }]; a.attack = [{ k: 'reanimate', any: false, mvMax: 3, perm: true, lands: true }]; cover(ALL); },
     'Vindicate': (a, cover) => { a.spell = [{ k: 'removal', what: 'permanent' }]; cover(ALL); },
@@ -1182,6 +1189,8 @@ function analyzeCard(data, deckColors, fullName) {
       const s = new Set(c.info.kw);
       c.eot.kw.forEach((k) => s.add(k));
       const ctrl = this.P(c.ctrl);
+      // Wonder: from the graveyard, with an Island out, our creatures fly
+      if (c.info.isCreature && ctrl.gy.some((x) => x.info.gyFlyIsland) && ctrl.bf.some((l) => l.info.isLand && this.landTypes(ctrl, l).includes('Island'))) s.add('flying');
       for (const { s: st, c: src } of this.statics(ctrl, 'anthem')) {
         if (st.other && src === c) continue;
         if (st.sub && !this.isType(c, st.sub)) continue;
@@ -2050,6 +2059,7 @@ function analyzeCard(data, deckColors, fullName) {
       if (c.info.etbCounters) c.p1 = this.counterAmount(p, c.info.etbCounters === 'X' ? (o.xVal || 0) : c.info.etbCounters);
       if (c.copyPlusOne && c.info.isCreature) c.p1 += this.counterAmount(p, 1);
       if (o.p1) c.p1 = (c.p1 || 0) + o.p1;
+      if (c.info.etbMinus) c.p1 = (c.p1 || 0) - c.info.etbMinus; // enters with -1/-1 counters (Flitterwing Nuisance, Moonshadow)
       // charge counters it enters with count as counters being put on it (Doubling Season doubles them)
       if (c.info.chargeX) c.charge = o.xVal ? this.counterAmount(p, o.xVal, 'charge') : 0;
       if (c.info.multikicker) c.charge = o.kicks ? this.counterAmount(p, o.kicks, 'charge') : 0;
@@ -2707,9 +2717,26 @@ function analyzeCard(data, deckColors, fullName) {
           break;
         }
         case 'massReanimate': {
-          const all = this.players.flatMap((q) => q.gy.filter((c) => c.info.isCreature));
+          const all = (fx.own ? [p] : this.players).flatMap((q) => q.gy.filter((c) => c.info.isCreature && (fx.mvMax == null || (c.info.mv || 0) <= fx.mvMax)));
           for (const c of all) { this.removeFrom(this.P(c.owner).gy, c); this.enterBattlefield(c, p, { quiet: true }); }
-          this.emit('reanimate', `${name}: ${all.length} creatures from every graveyard join ${p.name}!`, { seat: p.seat, cards: all.map((c) => c.id) });
+          this.emit('reanimate', fx.own ? `${name}: ${p.name} returns ${all.length ? this.listNames(all.map((c) => c.info.name)) : 'nothing'} to the battlefield.` : `${name}: ${all.length} creatures from every graveyard join ${p.name}!`, { seat: p.seat, cards: all.map((c) => c.id) });
+          break;
+        }
+        case 'livingDeath': {
+          // each player's graveyard creatures and battlefield creatures swap places
+          const sets = this.alive().map((q) => { const cs = q.gy.filter((c) => c.info.isCreature); for (const c of cs) { this.removeFrom(q.gy, c); c.zone = 'exile'; q.exile.push(c); } return [q, cs]; });
+          for (const q of this.alive()) for (const c of q.bf.filter((x) => x.info.isCreature)) this.destroy(c, 'sacrificed', true);
+          for (const [q, cs] of sets) for (const c of cs) { if (q.lost) continue; this.removeFrom(q.exile, c); this.enterBattlefield(c, q, { quiet: true }); }
+          this.emit('wipe', `${name}: every creature on the battlefield dies, and every creature in a graveyard comes back.`, { seat: p.seat, cards: sets.flatMap(([, cs]) => cs.map((c) => c.id)) });
+          break;
+        }
+        case 'victimize': {
+          const fod = p.bf.filter((c) => c.info.isCreature && !c.isCommander).sort((a, b) => this.creatureValue(a) - this.creatureValue(b))[0];
+          const back = p.gy.filter((c) => c.info.isCreature).sort((a, b) => this.gyCreatureValue(b) - this.gyCreatureValue(a)).slice(0, 2);
+          if (!fod || !back.length) break;
+          this.destroy(fod, 'sacrificed', true);
+          for (const c of back) { if (c.zone !== 'gy') continue; this.removeFrom(p.gy, c); this.enterBattlefield(c, p, { quiet: true, tapped: true }); }
+          this.emit('reanimate', `${name}: ${p.name} sacrifices ${fod.info.name} and returns ${this.listNames(back.map((c) => c.info.name))} tapped.`, { seat: p.seat, cards: back.map((c) => c.id) });
           break;
         }
         case 'reanimateType': {
@@ -3517,6 +3544,7 @@ function analyzeCard(data, deckColors, fullName) {
       return out;
     }
 
+    gyCreatureValue(c) { const i = c.info; return (i.power || 0) * 1.6 + (i.toughness || 0) * 0.8 + (i.mv || 0) * 0.6 + (i.etb && i.etb.length ? 3 : 0) + (i.statics && i.statics.length ? 2 : 0) + (i.triggers && i.triggers.length ? 2 : 0); }
     // Can p pay this card's alternative cost right now?
     altCostOk(p, c) {
       const a = c.info.altCost;
@@ -3552,6 +3580,8 @@ function analyzeCard(data, deckColors, fullName) {
       if (c.info.henge) red += Math.max(0, ...p.bf.filter((x) => x.info.isCreature).map((x) => this.power(x)));
       if (red) cost = { ...cost, generic: Math.max(0, cost.generic - red) };
       if (c.info.convoke) { const helpers = p.bf.filter((x) => x.info.isCreature && !x.tapped && !this.canAttack(x)).length; cost = { ...cost, generic: Math.max(0, cost.generic - helpers) }; }
+      // delve: each card exiled from the graveyard pays for one generic mana (exiled in castSpell)
+      if (c.info.delve) { const n = Math.min(cost.generic, p.gy.filter((x) => x !== c).length); c._delveN = n; if (n) cost = { ...cost, generic: cost.generic - n }; }
       return cost;
     }
 
@@ -3621,6 +3651,17 @@ function analyzeCard(data, deckColors, fullName) {
         }
         if (f.k === 'exchange') { const t = this.bestOppTarget(p, (x) => x.info.isCreature && tgtOk(x) && (!f.pmax || this.power(x) <= f.pmax)); if (!t) return -1; s += this.creatureValue(t) * 1.5; }
         if (f.k === 'edict') { if (!opp.some((q) => q.bf.some((x) => x.info.isCreature))) return -1; s += 8; }
+        if (f.k === 'livingDeath') { // the swap is worth what each player gains: their graveyard creatures minus their board's
+          const gain = (q) => q.gy.filter((x) => x.info.isCreature).reduce((a, x) => a + this.gyCreatureValue(x), 0) - q.bf.filter((x) => x.info.isCreature).reduce((a, x) => a + this.creatureValue(x), 0);
+          const d = gain(p) - Math.max(0, ...opp.map(gain));
+          if (d < 6) return -1; s += Math.min(40, d);
+        }
+        if (f.k === 'victimize') {
+          const back = p.gy.filter((x) => x.info.isCreature).map((x) => this.gyCreatureValue(x)).sort((a, b) => b - a).slice(0, 2);
+          const fod = p.bf.filter((x) => x.info.isCreature && !x.isCommander).map((x) => this.creatureValue(x)).sort((a, b) => a - b)[0];
+          if (fod == null || !back.length) return -1; s += back.reduce((a, b) => a + b, 0) - fod;
+        }
+        if (f.k === 'massReanimate' && f.own) { const v = p.gy.filter((x) => x.info.isCreature && (f.mvMax == null || (x.info.mv || 0) <= f.mvMax)).reduce((a, x) => a + this.gyCreatureValue(x), 0); if (v < 4) return -1; s += Math.min(35, v); }
         if (f.k === 'wipe') {
           if (f.what === 'lands') { const myLands = p.bf.filter((x) => x.info.isLand).length; const theirs = Math.max(...opp.map((q) => q.bf.filter((x) => x.info.isLand).length)); if (myLands >= theirs || mine < oppMax) return -1; s += 15; continue; }
           const w = this.wipeEval(p, f, c, from);
@@ -3712,6 +3753,7 @@ function analyzeCard(data, deckColors, fullName) {
       const i = c.info;
       const sample = this.collect ? this.nnSample(p, c, from) : null;
       let cost = this.costFor(p, c, from);
+      const delveN = i.delve ? c._delveN || 0 : 0;
       let xVal = 0;
       if (p.lost || this.over) return false; // a player who has lost takes no more actions
       if (cost.x) { xVal = this.maxX(p, cost); if (i.spell.some((f) => f.k === 'genesis' && !f.majestic)) xVal = this.genesisX(p, xVal); if (xVal < this.minX(c)) return false; }
@@ -3735,6 +3777,11 @@ function analyzeCard(data, deckColors, fullName) {
       const useAlt = !!i.altCost && this.altChosen(p, c, from); // (decided before the mana is spent)
       if (!this.pay(p, cost, xVal, true)) return false;
       if (useAlt) { this.payAltCost(p, c); if (p.lost || this.over) return true; }
+      if (delveN) { // the least useful cards go: not creatures (reanimation targets), not lands we might replay
+        const ex = p.gy.filter((x) => x !== c).sort((a, b) => (a.info.isCreature ? 10 : 0) + (a.info.isLand ? 3 : 0) + (a.info.mv || 0) * 0.3 - ((b.info.isCreature ? 10 : 0) + (b.info.isLand ? 3 : 0) + (b.info.mv || 0) * 0.3)).slice(0, delveN);
+        for (const x of ex) { this.removeFrom(p.gy, x); x.zone = 'exile'; p.exile.push(x); }
+        this.emit('effect', `${p.name} delves ${ex.length} card${ex.length > 1 ? 's' : ''} from the graveyard to cast ${i.name}.`, { seat: p.seat, cards: [c.id] });
+      }
       let colorsSpent = Math.min(i.mv || 0, new Set(((this.pendingMana && this.pendingMana.spent) || []).filter((x) => COLORS.includes(x))).size);
       if (i.converge && this.pendingMana) { // converge: the payer picks the colours, so count the most different colours the sources used could have made
         const opts = (this.pendingMana.sources || []).map((id) => this.cards[id]).filter((x) => x && x.info.mana).map((x) => x.info.mana.opts.flatMap((o) => o.colors).filter((k) => COLORS.includes(k)));

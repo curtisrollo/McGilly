@@ -65,6 +65,54 @@ export default [
       return { ok: me.life === 7 && !me.lost, note: `life ${me.life}` };
     },
   },
+  // ---------- graveyard ----------
+  {
+    card: 'Living Death', title: 'graveyard creatures come back and battlefield creatures die, for every player',
+    wrong: 'it had no effect',
+    run({ table, put, card }) {
+      const g = raffine(table); const [me, opp] = g.players; me.bf = me.bf.filter((c) => c.info.isLand); opp.bf = opp.bf.filter((c) => c.info.isLand);
+      const mine = card(g, me, 'Archon of Cruelty', 'gy'); const theirs = put(g, opp, 'Old Gnawbone'); const ld = card(g, me, 'Living Death', 'hand');
+      g.resolveEffects(me, ld.info.spell, ld, null, true);
+      return { ok: mine.zone === 'bf' && theirs.zone !== 'bf', note: `Archon ${mine.zone}, Gnawbone ${theirs.zone}` };
+    },
+  },
+  {
+    card: 'Victimize', title: 'sacrifices the cheapest creature and returns the two best from the graveyard, tapped',
+    wrong: 'it had no effect',
+    run({ table, put, card }) {
+      const g = raffine(table); const me = g.players[0]; me.bf = me.bf.filter((c) => c.info.isLand); me.gy = [];
+      const fod = put(g, me, 'Generous Pup'); const a = card(g, me, 'Archon of Cruelty', 'gy'); const b = card(g, me, 'Elesh Norn, Grand Cenobite', 'gy'); card(g, me, 'Moonshadow', 'gy');
+      const v = card(g, me, 'Victimize', 'hand'); g.resolveEffects(me, v.info.spell, v, null, true);
+      return { ok: fod.zone !== 'bf' && a.zone === 'bf' && b.zone === 'bf' && a.tapped && b.tapped, note: `Pup ${fod.zone}; Archon ${a.zone}${a.tapped ? ' tapped' : ''}, Elesh Norn ${b.zone}` };
+    },
+  },
+  {
+    card: 'Treasure Cruise', title: 'delve: exiles graveyard cards to pay, so it is cast with one land',
+    wrong: 'delve was not read: it needed eight mana',
+    run({ table, card, addLand }) {
+      const g = raffine(table); const me = g.players[0]; me.hand = []; me.bf = []; me.gy = []; addLand(g, me);
+      for (const n of ['Sol Ring', 'Forest', 'Exploration', 'Swamp', 'Island', 'Plains', 'Mountain']) card(g, me, n, 'gy');
+      const tc = card(g, me, 'Treasure Cruise', 'hand'); const d0 = me.cardsDrawn; g.mainPhase(me);
+      return { ok: tc.zone !== 'hand' && me.exile.length >= 7 && me.cardsDrawn - d0 >= 3, note: `Cruise ${tc.zone}; exiled ${me.exile.length}; drew ${me.cardsDrawn - d0}` };
+    },
+  },
+  {
+    card: 'Wonder', title: 'in the graveyard with an Island out, our creatures fly',
+    wrong: 'its graveyard ability was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const me = g.players[0]; const pup = put(g, me, 'Generous Pup'); put(g, me, 'Island');
+      const before = g.hasKw(pup, 'flying'); card(g, me, 'Wonder', 'gy'); g.emit('effect', 'x'); const after = g.hasKw(pup, 'flying');
+      return { ok: !before && after, note: `flying ${before} -> ${after}` };
+    },
+  },
+  {
+    card: 'Moonshadow', title: 'enters with six -1/-1 counters',
+    wrong: '"enters with -1/-1 counters" was not read',
+    run({ table, card }) {
+      const g = raffine(table); const me = g.players[0]; const m = card(g, me, 'Moonshadow', 'hand'); g.removeFrom(me.hand, m); g.enterBattlefield(m, me, { quiet: true });
+      return { ok: m.p1 === -6, note: `counters ${m.p1}` };
+    },
+  },
   {
     card: 'Force of Negation', title: 'free (exile a blue card) only on an opponent\'s turn',
     wrong: '(regression guard for the general alternative-cost code)',

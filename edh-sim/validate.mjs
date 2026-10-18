@@ -51,7 +51,7 @@ function addLand(g, p) {
 function populate(g) {
   const [me, ...opps] = g.players;
   put(g, me, 'Birds of Paradise'); put(g, me, 'Vampire Nighthawk', { p1: 1 }); put(g, me, 'Sol Ring'); put(g, me, 'Basalt Monolith');
-  for (const n of ['Craterhoof Behemoth', 'Sol Ring', 'Exploration', 'Forest', 'Eternal Witness']) card(g, me, n, 'gy');
+  for (const n of ['Craterhoof Behemoth', 'Sol Ring', 'Exploration', 'Forest', 'Eternal Witness', 'Birds of Paradise']) card(g, me, n, 'gy'); // (Birds: a cheap creature, for "mana value 2 or less" reanimation)
   card(g, me, 'Wurmcoil Engine', 'exile');
   for (let i = 0; i < 3; i++) card(g, me, 'Forest', 'hand');
   card(g, me, 'Craterhoof Behemoth', 'hand'); card(g, me, 'Falkenrath Noble', 'hand');
