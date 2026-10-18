@@ -2070,6 +2070,7 @@ function analyzeCard(data, deckColors, fullName) {
 
     // ----- battlefield entry -----
     enterBattlefield(c, p, o = {}) {
+      if (c.zone === 'bf' && this.players.some((q) => q.bf.includes(c))) return; // already there: a card can't enter twice
       this._nnTick = (this._nnTick || 0) + 1;
       if (++this.steps > Game.STEP_LIMIT) throw new Runaway(); // permanents entering count toward the runaway limit too (a token loop hung training)
       // a card is only ever in one place: take it out of whatever zone still holds it
@@ -2741,7 +2742,7 @@ function analyzeCard(data, deckColors, fullName) {
         }
         case 'massReanimate': {
           const all = (fx.own ? [p] : this.players).flatMap((q) => q.gy.filter((c) => c.info.isCreature && (fx.mvMax == null || (c.info.mv || 0) <= fx.mvMax)));
-          for (const c of all) { this.removeFrom(this.P(c.owner).gy, c); this.enterBattlefield(c, p, { quiet: true }); }
+          for (const c of all) { if (c.zone !== 'gy') continue; this.removeFrom(this.P(c.owner).gy, c); this.enterBattlefield(c, p, { quiet: true }); } // (a creature returning can reanimate another first)
           this.emit('reanimate', fx.own ? `${name}: ${p.name} returns ${all.length ? this.listNames(all.map((c) => c.info.name)) : 'nothing'} to the battlefield.` : `${name}: ${all.length} creatures from every graveyard join ${p.name}!`, { seat: p.seat, cards: all.map((c) => c.id) });
           break;
         }
@@ -2749,7 +2750,7 @@ function analyzeCard(data, deckColors, fullName) {
           // each player's graveyard creatures and battlefield creatures swap places
           const sets = this.alive().map((q) => { const cs = q.gy.filter((c) => c.info.isCreature); for (const c of cs) { this.removeFrom(q.gy, c); c.zone = 'exile'; q.exile.push(c); } return [q, cs]; });
           for (const q of this.alive()) for (const c of q.bf.filter((x) => x.info.isCreature)) this.destroy(c, 'sacrificed', true);
-          for (const [q, cs] of sets) for (const c of cs) { if (q.lost) continue; this.removeFrom(q.exile, c); this.enterBattlefield(c, q, { quiet: true }); }
+          for (const [q, cs] of sets) for (const c of cs) { if (q.lost || c.zone !== 'exile') continue; this.removeFrom(q.exile, c); this.enterBattlefield(c, q, { quiet: true }); }
           this.emit('wipe', `${name}: every creature on the battlefield dies, and every creature in a graveyard comes back.`, { seat: p.seat, cards: sets.flatMap(([, cs]) => cs.map((c) => c.id)) });
           break;
         }
