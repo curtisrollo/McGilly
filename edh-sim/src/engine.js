@@ -959,6 +959,8 @@ function analyzeCard(data, deckColors, fullName) {
   // ---------- Game ----------
   // Thrown when a game makes far more mana payments and permanents than any real game (a loop the AI can't get out of)
   class Runaway extends Error {}
+  // a game that runs past Game.TIME_LIMIT: unlike a look-ahead's own runaway, it isn't swallowed by the look-ahead's error handling
+  class TimeUp extends Runaway {}
   class Game {
     constructor(decks, db, seed, opts = {}) {
       this.db = db;
@@ -2012,7 +2014,7 @@ function analyzeCard(data, deckColors, fullName) {
 
     // Attempt to pay; returns plan or null. If commit, taps sources.
     pay(p, cost, xVal = 0, commit = false, extraGeneric = 0) {
-      if (++this.steps > Game.STEP_LIMIT) throw new Runaway(); // see run(): a game stuck in a loop is called a draw
+      this.tick(); // see run(): a game stuck in a loop is called a draw
       const srcs = this.sources(p).map((s) => ({ ...s, used: false }));
       const pool = { ...(p.floating || {}) }; // mana already floating, plus extra from multi-amount sources
       if (p.pool) pool.ANY = (pool.ANY || 0) + p.pool;
@@ -2123,7 +2125,7 @@ function analyzeCard(data, deckColors, fullName) {
     enterBattlefield(c, p, o = {}) {
       if (c.zone === 'bf' && this.players.some((q) => q.bf.includes(c))) return; // already there: a card can't enter twice
       this._nnTick = (this._nnTick || 0) + 1;
-      if (++this.steps > Game.STEP_LIMIT) throw new Runaway(); // permanents entering count toward the runaway limit too (a token loop hung training)
+      this.tick(); // permanents entering count toward the runaway limit too (a token loop hung training)
       // a card is only ever in one place: take it out of whatever zone still holds it
       for (const q of this.players) for (const z of ['hand', 'gy', 'exile', 'library', 'command']) if (q[z].includes(c)) this.removeFrom(q[z], c);
       c.zone = 'bf'; c.ctrl = p.seat; c.sick = true; c.tapped = !!o.tapped; c.dmg = 0;
@@ -4121,7 +4123,14 @@ function analyzeCard(data, deckColors, fullName) {
     }
 
     // ----- turn structure -----
+    // one step toward the runaway limits: STEP_LIMIT payments/permanents/walker uses, and TIME_LIMIT ms of wall clock
+    tick() {
+      if (++this.steps > Game.STEP_LIMIT) throw new Runaway();
+      if ((this.steps & 255) === 0) this.checkTime();
+    }
+    checkTime() { if (this.deadline && Date.now() > this.deadline) throw new TimeUp(); }
     run() {
+      if (Game.TIME_LIMIT) this.deadline = Date.now() + Game.TIME_LIMIT;
       this.emit('start', `Seats shuffled. ${this.players.map((p) => p.name).join(', ')} sit down.`);
       for (const p of this.players) { this.R.shuffle(p.library); this.openingHand(p); }
       this.active = this.R.int(4);
@@ -4130,7 +4139,7 @@ function analyzeCard(data, deckColors, fullName) {
       try { this.loop(); } catch (e) {
         if (!(e instanceof Runaway)) throw e;
         this.over = true; this.winner = null; this.timeout = true; this.runaway = true;
-        this.emit('win', `Game stopped: the AI got stuck repeating an action (${Game.STEP_LIMIT.toLocaleString()} payments and permanents). Called a draw.`);
+        this.emit('win', e instanceof TimeUp ? `Game stopped: it ran over ${Game.TIME_LIMIT / 1000}s (the AI was stuck thinking in a loop). Called a draw.` : `Game stopped: the AI got stuck repeating an action (${Game.STEP_LIMIT.toLocaleString()} payments and permanents). Called a draw.`);
       }
       return this;
     }
@@ -4139,6 +4148,7 @@ function analyzeCard(data, deckColors, fullName) {
       let lastSeat = -1;
       const order = (seat) => (seat - this.startSeat + 4) % 4;
       while (!this.over) {
+        this.checkTime();
         const p = this.P(this.active);
         if (!p.lost) {
           if (lastSeat < 0 || order(this.active) <= order(lastSeat)) this.round++;
@@ -4356,7 +4366,7 @@ function analyzeCard(data, deckColors, fullName) {
             if (!g.over && !pp.lost) { g.checkState(); g.restOfTurn(pp, 'main'); }
             if (!g.over && !pp.lost) g.playToTurnOf(p.seat);
             t += g.lookValue(g, p.seat);
-          } catch (e) { t += keep ? 0 : -1e6; }
+          } catch (e) { if (e instanceof TimeUp) throw e; t += keep ? 0 : -1e6; }
         }
         return t / 2;
       };
@@ -4480,7 +4490,7 @@ function analyzeCard(data, deckColors, fullName) {
             if (!g.over && !pp.lost) g.restOfTurn(pp, g.phase === 'main 2' ? 'main 2' : 'main');
             if (!g.over && !pp.lost) g.playToTurnOf(p.seat);
             t += g.lookValue(g, p.seat);
-          } catch (e) { t += play ? -1e6 : 0; }
+          } catch (e) { if (e instanceof TimeUp) throw e; t += play ? -1e6 : 0; }
         }
         return t / 2;
       };
@@ -4518,6 +4528,7 @@ function analyzeCard(data, deckColors, fullName) {
     // A copy of the game to try a line on. Card data (info) is shared, everything that changes is copied. Hidden
     // information stays hidden: every library is reshuffled in the copy, so the search can't peek at draws.
     cloneForLook() {
+      this.checkTime();
       const seen = new Map(), skip = new Set(['info', 'baseInfo', 'db', '_ac', 'nn', 'R', 'events', 'samples', 'mullSamples', 'emit', 'stats', '_crBuf']);
       const cp = (v, key) => {
         if (v === null || typeof v !== 'object' || skip.has(key)) return v;
@@ -4582,7 +4593,7 @@ function analyzeCard(data, deckColors, fullName) {
           if (!second && !g.over && !pp.lost && g.active === p.seat) { g.emptyPools(); g.phase = 'combat'; g.combat(pp); if (!g.over && !pp.lost) { g.emptyPools(); g.phase = 'main 2'; g.mainPhase(pp, true); } }
           if (learn) learnT[cands.indexOf(pk)] = g.winner === p.seat ? 1 : pp.lost || g.over ? 0 : g.nnV(pp); // the line's result, for training
           return g.lookValue(g, p.seat);
-        } catch (e) { return -Infinity; }
+        } catch (e) { if (e instanceof TimeUp) throw e; return -Infinity; }
       });
       // Learning from the search (training games only): each cast option's result is an example of what casting that card
       // here leads to, cast or not; the best line's result is an example of what this position is worth
@@ -5093,7 +5104,7 @@ function analyzeCard(data, deckColors, fullName) {
           if (g.over || pp.lost || !g.castSpell(pp, c, o.from, o.gyType)) return -Infinity;
           g.restOfTurn(pp, this.phase === 'main 2' ? 'main 2' : 'main');
           return g.lookValue(g, p.seat);
-        } catch (e) { return -Infinity; }
+        } catch (e) { if (e instanceof TimeUp) throw e; return -Infinity; }
       };
       return val(true) > val(false) + 2;
     }
@@ -5172,7 +5183,7 @@ function analyzeCard(data, deckColors, fullName) {
 
     walkerOnce(p, c) {
       if (p.lost || this.over) return false;
-      if (++this.steps > Game.STEP_LIMIT) throw new Runaway(); // walker activations count toward the runaway limit too
+      this.tick(); // walker activations count toward the runaway limit too
       const abs = c.info.loyaltyAbs;
       if (!abs.length) return false;
       const carth = this.has(p, 'carth') ? 1 : 0;
@@ -5462,7 +5473,7 @@ function analyzeCard(data, deckColors, fullName) {
               g._forcedAtk = { q: q.seat, ids: plan.map((a) => a.id), side: plan.side }; g.combat(pp); g._forcedAtk = null;
               if (!g.over && !pp.lost) { g.emptyPools(); g.phase = 'main 2'; g.mainPhase(pp, true); }
               return g.lookValue(g, p.seat);
-            } catch (e) { return -Infinity; }
+            } catch (e) { if (e instanceof TimeUp) throw e; return -Infinity; }
           });
           let bi = 0; for (let i = 1; i < res.length; i++) if (res[i] > res[bi]) bi = i;
           if (!(bi > 0 && res[bi] > res[0] + 4)) bi = 0;
@@ -5734,7 +5745,7 @@ function analyzeCard(data, deckColors, fullName) {
           setup(g, o);
           if (toNextTurn && !g.over && !g.players[seat].lost) g.playToTurnOf(seat);
           return g.lookValue(g, seat);
-        } catch (e) { return -Infinity; }
+        } catch (e) { if (e instanceof TimeUp) throw e; return -Infinity; }
       });
       let bi = 0; for (let i = 1; i < res.length; i++) if (res[i] > res[bi]) bi = i;
       return bi > 0 && res[bi] > res[0] + margin ? bi : 0;
@@ -5822,6 +5833,7 @@ function analyzeCard(data, deckColors, fullName) {
     }
   }
 
+  Game.TIME_LIMIT = 120000; // ms of wall clock per game (normal games take a few seconds even with the look-ahead)
   Game.STEP_LIMIT = 200000; // mana payments per game; real games use under 3,000
   Game.NN_CARD = 30;      // card features (see nnCard)
   Game.NN_STATE = 40;     // board features (see nnState and _nnRich)

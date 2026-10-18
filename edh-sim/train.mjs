@@ -62,7 +62,7 @@ if (process.env.TRAIN_WORKER) {
   process.on('message', (job) => {
     if (job.nnKey !== nnKey) { nnKey = job.nnKey; nnObj = job.nn ? Game.loadNN(job.nn) : null; }
     if (job.nn === undefined && job.nnKey == null) nnObj = null;
-    process.send({ id: job.id, res: job.specs.map((sp) => playOne(sp, nnObj)) });
+    process.send({ id: job.id, res: job.specs.map((sp) => { process.send({ progress: true, seed: sp.seed }); return playOne(sp, nnObj); }) });
   });
 }
 // the worker pool: games go out in small chunks to whichever worker is free; results come back in order
@@ -86,14 +86,19 @@ function runGames(specs, nn, nnKey, label) {
       if (next >= specs.length) return;
       const id = next, chunk = specs.slice(id, id + CH); next += CH;
       const w = workers[k];
+      let cur = null; // the game the worker is on (it says before each one)
       const timer = setTimeout(() => {
         w.removeAllListeners('message'); w.kill('SIGKILL');
-        console.log(`    watchdog: games ${chunk[0].seed}-${chunk[chunk.length - 1].seed} took over ${WATCHDOG} min (a loop); counted as draws (${chunk.map((sp) => sp.pod.join('/')).slice(0, 1)}...)`);
+        const stuck = chunk.find((sp) => sp.seed === cur);
+        console.log(`    watchdog: games ${chunk[0].seed}-${chunk[chunk.length - 1].seed} took over ${WATCHDOG} min; stuck on game ${cur}${stuck ? ' (' + stuck.pod.join('/') + ')' : ''}; the chunk counts as draws`);
+        // keep what's needed to replay it: the game and the network it was played with
+        try { fs.mkdirSync('stuck-games', { recursive: true }); fs.writeFileSync(`stuck-games/${cur}.json`, JSON.stringify({ spec: stuck, nn })); console.log(`    saved to stuck-games/${cur}.json`); } catch (e) { /* (best effort) */ }
         workers[k] = spawn(); // (it loads the network from its first job)
-        finish(id, chunk.map(() => ({ winner: null, runaway: true, out: [], hands: [] })));
+        finish(id, chunk.map(() => ({ winner: null, runaway: true, out: [], hands: [], search: [] })));
         give(k);
       }, WATCHDOG * 60000);
-      w.once('message', (m) => { clearTimeout(timer); finish(m.id, m.res); give(k); });
+      const onMsg = (m) => { if (m.progress) { cur = m.seed; return; } w.removeListener('message', onMsg); clearTimeout(timer); finish(m.id, m.res); give(k); };
+      w.on('message', onMsg);
       w.send({ id, specs: chunk, nn, nnKey });
     };
     workers.forEach((_, k) => give(k));
