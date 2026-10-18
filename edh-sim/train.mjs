@@ -58,6 +58,7 @@ function playOne(spec, nn) {
 }
 if (process.env.TRAIN_WORKER) {
   let nnKey = null, nnObj = null;
+  process.on('disconnect', () => process.exit(0)); // the main process went away (stopped): don't keep playing as an orphan
   process.on('message', (job) => {
     if (job.nnKey !== nnKey) { nnKey = job.nnKey; nnObj = job.nn ? Game.loadNN(job.nn) : null; }
     if (job.nn === undefined && job.nnKey == null) nnObj = null;
