@@ -128,6 +128,7 @@
     if ((m = l.match(/(destroy|exile) (?:another |up to one |any number of )?target (nonland permanent|permanent|creature or planeswalker|creature or vehicle|artifact or enchantment|artifact, enchantment, or planeswalker|artifact|enchantment|planeswalker|nonblack creature|nonartifact creature|tapped creature|attacking creature|creature|nonland, nontoken permanent)/))) {
       let what = m[2];
       if (/nonland|^permanent/.test(what)) what = 'nonland';
+      else if (/^(nonblack|nonartifact|tapped|attacking) creature$/.test(what)) what = { 'nonblack creature': 'nonblackCreature', 'nonartifact creature': 'nonartifactCreature', 'tapped creature': 'tappedCreature', 'attacking creature': 'attackingCreature' }[what];
       else if (/creature/.test(what)) what = /planeswalker/.test(what) ? 'creaturepw' : 'creature';
       else if (/artifact or enchantment|artifact, enchantment/.test(what)) what = 'artench';
       fx.push({ k: 'removal', what, exile: m[1] === 'exile', gainToughness: /you gain life equal to its toughness/.test(l) });
@@ -356,6 +357,8 @@
         continue;
       }
       if (a.isInstant || a.isSorcery) {
+        const alt = parseAltCost(low);
+        if (alt) { a.freeAlt = true; a.altCost = alt; continue; }
         if (/^(you may pay|if you control a commander, you may cast|you may exile a)/.test(low) && /rather than pay|without paying its mana cost/.test(low)) { a.freeAlt = true; continue; }
         if (/^overload/.test(low) || /^cycling/.test(low) || /^kicker/.test(low) || /^flashback/.test(low)) continue;
         a.spell.push(...PE(line));
@@ -673,7 +676,7 @@
     'Farewell': (a, cover) => { a.spell = [{ k: 'wipe', what: 'farewell', exile: true }]; cover(ALL); },
     'Feldon of the Third Path': (a, cover) => { a.activated = [{ tap: true, cost: parseCost('2 R'), fx: [{ k: 'feldon' }], text: 'Make a hasty token copy of a creature card in your graveyard.' }]; cover(ALL); },
     'Field of the Dead': (a, cover) => { cover(ALL); },
-    'Force of Negation': (a, cover) => { a.freeAlt = true; a.freeAltNotYourTurn = true; cover(ALL); },
+    'Force of Negation': (a, cover) => { cover(ALL); }, // (alternative cost: parseAltCost)
     'Forsaken Monument': (a, cover) => { a.monument = true; cover(ALL); },
     'Foundry Inspector': (a, cover) => { a.statics.push({ k: 'reduce', what: 'artifact', n: 1 }); cover(ALL); },
     'Ugin, the Ineffable': (a, cover) => { a.statics.push({ k: 'reduce', what: 'colorless', n: 2 }); const m3 = a.loyaltyAbs.find((x) => x.delta === -3); if (m3) m3.fx = [{ k: 'removal', what: 'colored' }]; const p1 = a.loyaltyAbs.find((x) => x.delta === 1); if (p1) p1.fx = [{ k: 'uginPlus' }]; cover(/cost/); },
@@ -852,7 +855,21 @@
     'Quicksmith Genius': (a, cover) => { a.artifactEtb = true; cover(ALL); },
   });
 
-  function analyzeCard(data, deckColors, fullName) {
+  // Alternative costs ("rather than pay this spell's mana cost"): free with a commander out, exile a card of a colour from
+// hand, sacrifice a nontoken creature of a colour, or pay life (with a land type out). null when the line isn't one.
+const ALT_COLORS = { white: 'W', blue: 'U', black: 'B', red: 'R', green: 'G' };
+function parseAltCost(low) {
+  if (/if you control a commander, you may cast .*without paying its mana cost/.test(low)) return { kind: 'commander' };
+  if (!/rather than pay/.test(low)) return null;
+  const notYourTurn = /^if it's not your turn/.test(low);
+  let m;
+  if ((m = low.match(/you may exile an? (white|blue|black|red|green) card from your hand(?: and pay (\d+) life)? rather than pay/))) return { kind: 'exile', color: ALT_COLORS[m[1]], life: m[2] ? +m[2] : 0, notYourTurn };
+  if ((m = low.match(/you may sacrifice a nontoken (white|blue|black|red|green) creature rather than pay/))) return { kind: 'sac', color: ALT_COLORS[m[1]], notYourTurn };
+  if ((m = low.match(/^if you control an? (\w+), you may pay (\d+) life rather than pay/))) return { kind: 'life', n: +m[2], ifControl: m[1][0].toUpperCase() + m[1].slice(1), notYourTurn };
+  if ((m = low.match(/you may pay (\d+) life rather than pay/))) return { kind: 'life', n: +m[1], notYourTurn };
+  return null;
+}
+function analyzeCard(data, deckColors, fullName) {
     const faces = data.faces.map((f) => analyzeFace(f, deckColors));
     const front = faces[0];
     const script = SCRIPTS[fullName] || SCRIPTS[front.name];
@@ -3126,7 +3143,9 @@
       if (this.abolished(q)) return false;
       const card = force || q.hand.find((c) => ((c.info.spell && c.info.spell.some((f) => f.k === 'protect' && (!f.single || !wipe || (c.info.kickerProtectAll && this.pay(q, { ...c.info.cost, generic: c.info.cost.generic + c.info.kickerProtectAll.generic, pips: c.info.cost.pips.concat(c.info.kickerProtectAll.pips) }))))) || c.info.modalProtect) && this.pay(q, this.costFor(q, c, 'hand')));
       if (!card) return false;
-      if (card.info.kickerProtectAll && wipe) this.pay(q, { ...card.info.cost, generic: card.info.cost.generic + card.info.kickerProtectAll.generic, pips: card.info.cost.pips.concat(card.info.kickerProtectAll.pips) }, 0, true);
+      const useAlt = !!card.info.altCost && this.altChosen(q, card, 'hand');
+      if (useAlt) this.payAltCost(q, card);
+      else if (card.info.kickerProtectAll && wipe) this.pay(q, { ...card.info.cost, generic: card.info.cost.generic + card.info.kickerProtectAll.generic, pips: card.info.cost.pips.concat(card.info.kickerProtectAll.pips) }, 0, true);
       else this.pay(q, this.costFor(q, card, 'hand'), 0, true);
       this.removeFrom(q.hand, card);
       if (/exile teferi's protection|exile cardname/i.test(card.info.text || '')) { card.zone = 'exile'; q.exile.push(card); } else this.toGraveyard(card, q.seat);
@@ -3232,7 +3251,8 @@
           creature: (c) => c.info.isCreature, creaturepw: (c) => c.info.isCreature || c.info.isPW, nonland: (c) => !c.info.isLand,
           artifact: (c) => c.info.types.has('Artifact'), enchantment: (c) => c.info.types.has('Enchantment'),
           artench: (c) => c.info.types.has('Artifact') || c.info.types.has('Enchantment'), planeswalker: (c) => c.info.isPW,
-          nonlandNonPW: (c) => !c.info.isLand && !c.info.isPW, permanent: () => true, tappedCreature: (c) => c.info.isCreature && c.tapped, colored: (c) => !c.info.isLand && c.info.colors && c.info.colors.size > 0,
+          nonlandNonPW: (c) => !c.info.isLand && !c.info.isPW, permanent: () => true, tappedCreature: (c) => c.info.isCreature && c.tapped,
+          nonblackCreature: (c) => c.info.isCreature && !(c.info.colors && c.info.colors.has('B')), nonartifactCreature: (c) => c.info.isCreature && !c.info.types.has('Artifact'), attackingCreature: (c) => c.info.isCreature && c.attacking, colored: (c) => !c.info.isLand && c.info.colors && c.info.colors.size > 0,
         }[what] || ((c) => !c.info.isLand);
     }
     // Lock pieces: an opponent's permanent whose static ability is what stops p's plan. Worth that much to remove.
@@ -3488,11 +3508,33 @@
       return out;
     }
 
-    costFor(p, c, from) {
+    // Can p pay this card's alternative cost right now?
+    altCostOk(p, c) {
+      const a = c.info.altCost;
+      if (!a || (a.notYourTurn && this.active === p.seat) || this.locked(p)) return false;
+      if (a.kind === 'commander') return p.bf.some((x) => x.isCommander);
+      if (a.kind === 'exile') return p.hand.some((x) => x !== c && x.info.colors && x.info.colors.has(a.color)) && (!a.life || this.canPayLife(p, a.life));
+      if (a.kind === 'sac') return !!this.altSacPick(p, c);
+      if (a.kind === 'life') return (!a.ifControl || p.bf.some((x) => (x.info.isLand ? this.landTypes(p, x) : x.info.subtypes || []).includes(a.ifControl))) && this.canPayLife(p, a.n);
+      return false;
+    }
+    altSacPick(p, c) { const col = c.info.altCost.color; return p.bf.filter((x) => x.info.isCreature && !x.token && !x.isCommander && x.info.colors && x.info.colors.has(col) && !this.livePiece(p, x)).sort((x, y) => this.creatureValue(x) - this.creatureValue(y))[0]; }
+    // Use the alternative cost? Always when it's free (commander out); otherwise only when the mana isn't there.
+    altChosen(p, c, from) {
+      if (from !== 'hand' || !this.altCostOk(p, c)) return false;
+      return c.info.altCost.kind === 'commander' || !this.pay(p, this.costFor(p, c, from, true));
+    }
+    payAltCost(p, c) {
+      const a = c.info.altCost;
+      if (a.kind === 'exile') { const x = p.hand.filter((y) => y !== c && y.info.colors && y.info.colors.has(a.color)).sort((y, z) => this.cardValue(p, y) - this.cardValue(p, z))[0]; this.removeFrom(p.hand, x); x.zone = 'exile'; p.exile.push(x); if (a.life) this.loseLife(p, a.life); this.emit('effect', `${p.name} exiles ${x.info.name} from hand to cast ${c.info.name} for free.`, { seat: p.seat, cards: [c.id, x.id] }); }
+      else if (a.kind === 'sac') { const x = this.altSacPick(p, c); this.emit('effect', `${p.name} sacrifices ${x.info.name} to cast ${c.info.name} for free.`, { seat: p.seat, cards: [c.id, x.id] }); this.destroy(x, 'sacrificed', true); }
+      else if (a.kind === 'life') { this.emit('effect', `${p.name} pays ${a.n} life to cast ${c.info.name}.`, { seat: p.seat, cards: [c.id] }); this.loseLife(p, a.n); }
+    }
+    costFor(p, c, from, normal = false) {
       if (from === 'citadel' || from === 'valgavoth') return parseCost('');
       if (from === 'prepared') return parseCost(c.info.prepared.cost);
       if (from === 'channel') { const leg = p.bf.filter((x) => x.info.isCreature && x.info.isLegendary).length; const cc = c.info.channel.cost; return { ...cc, generic: Math.max(0, cc.generic - leg), mv: Math.max(cc.mv - cc.generic, cc.mv - leg) }; }
-      if (c.info.freeAlt && /if you control a commander, you may cast this spell without paying/i.test(c.info.text || '') && p.bf.some((x) => x.isCommander)) return parseCost('');
+      if (!normal && c.info.altCost && this.altChosen(p, c, from)) return parseCost(''); // (paid in castSpell / tryProtect / counter responses)
       if (from === 'hand' && (p.emblems || []).includes('freeSpells')) return parseCost('');
       let cost = from === 'command' ? this.commanderCost(p, c) : from === 'dash' ? c.info.dash : from === 'flashback' ? c.info.flashback : c.info.cost;
       let red = 0;
@@ -3557,7 +3599,7 @@
         if (f.k === 'tokens') s += 6 + this.fxNum(p, f.n, 3) * 2;
         if (f.k === 'treasure') s += 4;
         if (f.k === 'removal' || f.k === 'steal') {
-          const pred = f.what === 'creature' ? (x) => x.info.isCreature : (x) => !x.info.isLand;
+          const pred = f.k === 'removal' ? this.removalPred(f.what) : f.what === 'creature' ? (x) => x.info.isCreature : (x) => !x.info.isLand;
           const t = this.bestOppTarget(p, (x) => pred(x) && tgtOk(x));
           if (!t && i.isInstant || !t && i.isSorcery) return -1;
           // a bounce only costs the owner the mana to cast it again, unless it can't come back (a token, or a permanent
@@ -3681,7 +3723,9 @@
       if (!this.payAdditional(p, c, true)) return false;
       const overload = i.overload && this.pay(p, i.overload);
       if (overload && this.opps(p).some((q) => this.playerThreat(q) > 20)) cost = i.overload;
+      const useAlt = !!i.altCost && this.altChosen(p, c, from); // (decided before the mana is spent)
       if (!this.pay(p, cost, xVal, true)) return false;
+      if (useAlt) { this.payAltCost(p, c); if (p.lost || this.over) return true; }
       let colorsSpent = Math.min(i.mv || 0, new Set(((this.pendingMana && this.pendingMana.spent) || []).filter((x) => COLORS.includes(x))).size);
       if (i.converge && this.pendingMana) { // converge: the payer picks the colours, so count the most different colours the sources used could have made
         const opts = (this.pendingMana.sources || []).map((id) => this.cards[id]).filter((x) => x && x.info.mana).map((x) => x.info.mana.opts.flatMap((o) => o.colors).filter((k) => COLORS.includes(k)));
@@ -3700,6 +3744,7 @@
       else if (from === 'valgavoth') { this.removeFrom(this.P(c.owner).exile, c); c.voidBy = null; this.loseLife(p, i.mv); }
       else if (from === 'dash') { this.removeFrom(p.hand, c); }
       else if (from === 'flashback') { this.removeFrom(p.gy, c); c.flashedBack = true; }
+      if (p.lost || this.over) { c.zone = 'exile'; this.P(c.owner).exile.push(c); return true; } // paying life (Citadel, Valgavoth) set off something that ended them
       c.zone = 'stack';
       this.casts.push({ seat: p.seat, name: c.name, turn: this.round, id: c.id });
       if (sample) this.samples.push(sample);
@@ -3818,19 +3863,15 @@
           if (!f) continue;
           const okType = !f.filter || (f.filter === 'noncreature' && !i.isCreature) || (f.filter === 'creature' && i.isCreature) || (f.filter.includes('instant') && (i.isInstant || i.isSorcery || (f.filter.includes('enchantment') && i.types.has('Enchantment'))));
           if (!okType) continue;
-          let free = false;
-          if (cs.info.freeAlt) {
-            if (/if you control a commander/i.test(cs.info.text)) free = q.bf.some((x) => x.isCommander);
-            else if (/exile a blue card/i.test(cs.info.text)) free = q.hand.some((x) => x !== cs && x.info.colors.has('U')) && (!cs.info.freeAltNotYourTurn || this.active !== q.seat);
-            else free = true;
-          }
-          if (!free && !this.pay(q, cs.info.cost)) continue;
+          // the mana, or the alternative cost (free with a commander out; otherwise only when the mana isn't there)
+          const canMana = this.pay(q, cs.info.cost);
+          const free = cs.info.altCost ? this.altCostOk(q, cs) && (cs.info.altCost.kind === 'commander' || !canMana) : false;
+          if (!free && !canMana) continue;
           // the more dangerous the spell, the more likely they fire
           const chance = Math.min(0.95, 0.35 + (value + combo) * 0.06);
           if (this.R() > chance) continue;
-          if (free) {
-            if (/exile a blue card/i.test(cs.info.text)) { const b = q.hand.find((x) => x !== cs && x.info.colors.has('U')); this.removeFrom(q.hand, b); b.zone = 'exile'; q.exile.push(b); if (/pay 1 life/i.test(cs.info.text)) this.loseLife(q, 1); }
-          } else this.pay(q, cs.info.cost, 0, true);
+          if (free) this.payAltCost(q, cs);
+          else this.pay(q, cs.info.cost, 0, true);
           this.removeFrom(q.hand, cs); this.toGraveyard(cs, q.seat);
           this._counterExile = /exile it instead/i.test(cs.info.text);
           this.credit(cs, 'countered', 1);
@@ -4471,7 +4512,7 @@
       if (ab.lowPriority && !postCombat) return false;
       return ab.fx.some((f) => {
         switch (f.k) {
-          case 'removal': case 'steal': return !!this.bestOppTarget(p, (x) => (f.what === 'creature' ? x.info.isCreature : !x.info.isLand) && this.targetable(x, p));
+          case 'removal': case 'steal': return !!this.bestOppTarget(p, (x) => (f.k === 'removal' ? this.removalPred(f.what)(x) : f.what === 'creature' ? x.info.isCreature : !x.info.isLand) && this.targetable(x, p));
           case 'ramp': return this.rampFinds(p, f);
           case 'draw': case 'tokens': case 'treasure': case 'counters': case 'drain': case 'drainOne': case 'damage': case 'proliferate': case 'tutor': case 'loot': return true;
           case 'gain': return p.life < 40 || p.bf.some((x) => x.info.triggers.some((t) => t.k === 'bond' || t.k === 'onGain'));
@@ -4892,7 +4933,7 @@
         if (delta === -99) return { a, s: -99 };
         let s = 0;
         for (const f of a.fx) {
-          if (f.k === 'removal' || f.k === 'phaseOut' || f.k === 'freeze' || f.k === 'neutralize') s += this.bestOppTarget(p, (x) => (f.what === 'creature' || f.k === 'phaseOut' ? x.info.isCreature : !x.info.isLand) && this.targetable(x, p)) ? 9 : -5;
+          if (f.k === 'removal' || f.k === 'phaseOut' || f.k === 'freeze' || f.k === 'neutralize') s += this.bestOppTarget(p, (x) => (f.k === 'removal' ? this.removalPred(f.what)(x) : f.what === 'creature' || f.k === 'phaseOut' ? x.info.isCreature : !x.info.isLand) && this.targetable(x, p)) ? 9 : -5;
           else if (f.k === 'wipe' && f.what === 'big') { const big = (q) => q.bf.filter((x) => x.info.isCreature && this.power(x) >= 4).reduce((s2, x) => s2 + this.creatureValue(x) / (x.isCommander ? 2 : 1), 0); const v = this.opps(p).reduce((s2, q) => s2 + big(q), 0) - 1.5 * big(p); s += v >= 12 ? 10 + v / 3 : -10; } // Elspeth's -3
           else if (f.k === 'wipe') s += this.scoreCast(p, { info: { ...c.info, spell: [f], etb: [], isPermanent: false, isPW: false, mana: null, isCreature: false } }, 'hand') > 0 ? 14 : -10;
           else if (f.k === 'darettiWeld') { const fod = p.bf.some((x) => x.info.types.has('Artifact') && !x.isCommander && this.permValue(x) < 5); const best = Math.max(0, ...p.gy.filter((x) => x.info.types.has('Artifact') && x.info.isPermanent).map((x) => this.cardValue(p, x))); s += fod && best >= 6 ? 6 + best : -10; }

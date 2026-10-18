@@ -30,7 +30,10 @@ export function parseDeck(text) {
   return { commander, cards };
 }
 
+// meld halves Forge files under the melded pair's name
+const MELD = { 'Gisela, the Broken Blade': 'gisela_the_broken_blade_brisela_voice_of_nightmares' };
 function slugs(name) {
+  if (MELD[name]) return [MELD[name]];
   const base = name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/æ/gi, 'ae').toLowerCase();
   const out = new Set();
   for (const n of [base, base.split(' // ')[0]]) {
