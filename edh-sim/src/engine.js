@@ -1143,7 +1143,16 @@
     has(p, k) { for (const c of p.bf) { const ss = c.info.statics; if (ss) for (const s of ss) if (s.k === k) return true; } return false; }
 
     hasKw(c, k) { return this.kws(c).has(k); }
+    // kws and pt scan every static on the board; cached like creatureValue (until the next event or a change on the card)
+    // (each battlefield's size and life total are in the key: a permanent arriving or leaving by any route makes cached values stale)
+    bfSig() { let s2 = ''; for (const q of this.players) s2 += q.bf.length + ',' + q.life + '.'; return s2; } // (life too: Bloodghast has haste while an opponent is at 10 or less)
+    cacheKey(c) { return this._nnTick + ':' + this.bfSig() + c.p1 + ':' + c.dmg + ':' + c.eot.p + ':' + c.eot.t + ':' + c.eot.kw.length + ':' + c.ctrl + ':' + c.zone + ':' + (c.attached || ''); }
     kws(c) {
+      const key = this.cacheKey(c);
+      if (c._kw && c._kw.key === key) return c._kw.v;
+      const v = this._kws(c); c._kw = { key, v }; return v;
+    }
+    _kws(c) {
       const s = new Set(c.info.kw);
       c.eot.kw.forEach((k) => s.add(k));
       const ctrl = this.P(c.ctrl);
@@ -1173,6 +1182,11 @@
     power(c) { return this.pt(c)[0]; }
     toughness(c) { return this.pt(c)[1]; }
     pt(c) {
+      const key = this.cacheKey(c);
+      if (c._pt && c._pt.key === key) return c._pt.v;
+      const v = this._pt(c); c._pt = { key, v }; return v;
+    }
+    _pt(c) {
       let p = c.info.power ?? 0, t = c.info.toughness ?? 0;
       if (c.info.ptStar) { const n = this.P(c.ctrl).bf.filter((x) => x.info.isCreature).length; p = Math.max(p, Math.min(n, 8)); t = Math.max(t, Math.min(n, 8)); }
       if (c.info.name === 'Construct token' || /Construct/.test(c.info.name)) { const n = this.P(c.ctrl).bf.filter((x) => x.info.types.has('Artifact')).length; p += n; t += n; }
@@ -1331,6 +1345,7 @@
     }
 
     leaveBattlefield(c) {
+      this._nnTick = (this._nnTick || 0) + 1; // (the board changed: cached values are stale)
       const ctrl = this.P(c.ctrl);
       const i = ctrl.bf.indexOf(c); if (i >= 0) ctrl.bf.splice(i, 1);
       c.zone = 'leaving'; // so what it sets off on the way out (an Animate Dead falling off) can't move it a second time
@@ -1420,6 +1435,7 @@
 
     // Give one card its own copy of its rules info, with overrides (animation, copies, transformations)
     setInfo(c, over) {
+      this._nnTick = (this._nnTick || 0) + 1;
       if (!c.baseInfo) c.baseInfo = c.info;
       c.info = Object.assign(Object.create(Object.getPrototypeOf(c.info)), c.info, over);
     }
@@ -1997,6 +2013,7 @@
 
     // ----- battlefield entry -----
     enterBattlefield(c, p, o = {}) {
+      this._nnTick = (this._nnTick || 0) + 1;
       if (++this.steps > Game.STEP_LIMIT) throw new Runaway(); // permanents entering count toward the runaway limit too (a token loop hung training)
       // a card is only ever in one place: take it out of whatever zone still holds it
       for (const q of this.players) for (const z of ['hand', 'gy', 'exile', 'library', 'command']) if (q[z].includes(c)) this.removeFrom(q[z], c);
@@ -2125,6 +2142,16 @@
         case 'food': case 'clue': case 'blood': return `create a ${cap(f.k)}`;
         default: return null;
       }
+    }
+    // Can this ramp effect find anything? (the same filter the ramp effect uses: with no basics left, Kodama's Reach does
+    // nothing; with Tamiyo's emblem returning it to hand it was cast again and again, minutes per turn)
+    rampFinds(p, f) {
+      if (f.fromHand) return p.hand.some((c) => c.info.isLand);
+      if (f.ifBehind && !this.opps(p).some((q) => q.bf.filter((c) => c.info.isLand).length > p.bf.filter((c) => c.info.isLand).length)) return false;
+      const typeOk = (c) => !f.landTypes || f.landTypes.some((t) => (c.info.subtypes || []).includes(t));
+      if (f.landTypes) return p.library.some((c) => c.info.isLand && typeOk(c) && (!f.basicOnly || c.info.types.has('Basic')));
+      if (f.basicOnly) return p.library.some((c) => c.info.isLand && c.info.types.has('Basic'));
+      return p.library.some((c) => c.info.isLand && (f.anyLand ? !c.info.fetch : c.info.types.has('Basic') || !c.info.fetch));
     }
     // Would this effect actually do something right now? (conditions checked before announcing it)
     fxApplies(p, f) {
@@ -3142,7 +3169,16 @@
     }
 
     // ----- valuation -----
+    // Cached until the next game event (or its own counters / pump change): it scans every static on the board, and the
+    // AI asks thousands of times per decision (82% of the time on a big Myrkul board, seconds per decision)
     creatureValue(c) {
+      const key = this.cacheKey(c) + ':' + c.tapped;
+      if (c._cv && c._cv.key === key) return c._cv.v;
+      const v = this._creatureValue(c);
+      c._cv = { key, v };
+      return v;
+    }
+    _creatureValue(c) {
       const [p, t] = this.pt(c);
       const k = this.kws(c);
       let v = p * 1.6 + t * 0.8 + (c.info.mv || 0) * 0.6;
@@ -3501,6 +3537,8 @@
       // reactive cards are held
       if (i.spell.some((f) => f.k === 'counter' || f.k === 'protect') && !i.spell.some((f) => ['draw', 'removal', 'tokens'].includes(f.k))) return -1;
       if (i.isInstant && i.spell.length === 0 && /target creature you control|until end of turn/i.test(i.text)) return -1;
+      // a spell that only ramps, with nothing left to find, does nothing
+      if (!i.isPermanent && i.spell.length && i.spell.every((f) => f.k === 'ramp' && !this.rampFinds(p, f))) return -1;
       let s = 5 + i.mv;
       if (i.mana && !i.isLand) s += 30 - turnN * 2;
       if (from === 'command') s += 25 + i.mv;
@@ -3511,7 +3549,7 @@
       // targets as this card would see them (Serra's Emissary's protection from creatures stops Gilded Drake)
       const tgtOk = (x) => { this._ctx.push(c); try { return this.targetable(x, p); } finally { this._ctx.pop(); } };
       for (const f of fx) {
-        if (f.k === 'ramp') s += 28 - turnN * 2;
+        if (f.k === 'ramp') s += this.rampFinds(p, f) ? 28 - turnN * 2 : -6;
         if (f.k === 'draw') s += 6 + this.fxNum(p, f.n, 1) * 3 + (p.hand.length < 3 ? 8 : 0);
         if (f.k === 'wheel') s += p.hand.length < 3 ? 25 : -20;
         if (f.k === 'tutor' && p.tutorTurn === this.turn && p.tutorN >= 2) return -1; // (a tutor coming back to hand, Tamiyo's emblem: two a turn is plenty)
@@ -4425,7 +4463,8 @@
       return ab.fx.some((f) => {
         switch (f.k) {
           case 'removal': case 'steal': return !!this.bestOppTarget(p, (x) => (f.what === 'creature' ? x.info.isCreature : !x.info.isLand) && this.targetable(x, p));
-          case 'draw': case 'tokens': case 'treasure': case 'counters': case 'drain': case 'drainOne': case 'damage': case 'ramp': case 'proliferate': case 'tutor': case 'loot': return true;
+          case 'ramp': return this.rampFinds(p, f);
+          case 'draw': case 'tokens': case 'treasure': case 'counters': case 'drain': case 'drainOne': case 'damage': case 'proliferate': case 'tutor': case 'loot': return true;
           case 'gain': return p.life < 40 || p.bf.some((x) => x.info.triggers.some((t) => t.k === 'bond' || t.k === 'onGain'));
           case 'search': return f.dest !== 'gy' || p.gy.length < 20;
           case 'mill': return !this.gyHated(p) && (this.has(p, 'muldrotha') || p.bf.some((x) => x.info.sidisi) || p.hand.some((x) => x.info.spell.some((y) => y.k === 'reanimate')) || f.n <= 2);
