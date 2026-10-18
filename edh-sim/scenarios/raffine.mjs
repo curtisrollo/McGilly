@@ -155,6 +155,36 @@ export default [
       return { ok: t.p1 === -1, note: `Nighthawk counters ${t.p1}` };
     },
   },
+  // ---------- statics and the rest ----------
+  {
+    card: 'Thalia, Guardian of Thraben', title: 'noncreature spells cost {1} more, for every player',
+    wrong: 'the tax was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const [me, opp] = g.players; const dt = card(g, opp, 'Demonic Tutor', 'hand'); const pup = card(g, opp, 'Generous Pup', 'hand');
+      const a = g.costFor(opp, dt, 'hand').mv; put(g, me, 'Thalia, Guardian of Thraben'); g.emit('effect', 'x');
+      const b = g.costFor(opp, dt, 'hand').mv, c = g.costFor(opp, pup, 'hand').mv;
+      return { ok: b === a + 1 && c === (pup.info.mv || 0), note: `Demonic Tutor ${a} -> ${b}; Generous Pup ${c}` };
+    },
+  },
+  {
+    card: 'Kinscaer Sentry', title: 'attacking, puts a creature with mana value up to the number of attackers into play attacking',
+    wrong: 'its attack trigger was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const [me, opp] = g.players; me.bf = me.bf.filter((c) => c.info.isLand); opp.bf = opp.bf.filter((c) => c.info.isLand); me.hand = [];
+      const k = put(g, me, 'Kinscaer Sentry'); const pup = put(g, me, 'Generous Pup'); for (const c of [k, pup]) c.sick = false; const fr = card(g, me, 'Psychic Frog', 'hand');
+      g.chooseDefender = () => opp; g.active = me.seat; g.phase = 'combat'; g._forcedAtk = { q: opp.seat, ids: [k.id, pup.id] }; g.combat(me); g._forcedAtk = null;
+      return { ok: fr.zone === 'bf', note: `Psychic Frog (mana value ${fr.info.mv}) in ${fr.zone}` };
+    },
+  },
+  {
+    card: 'Dark Matter Manipulator', title: 'gets +2/+0 for every seven cards in the graveyard',
+    wrong: 'its static was not read',
+    run({ table, put, card }) {
+      const g = raffine(table); const me = g.players[0]; me.gy = []; const d = put(g, me, 'Dark Matter Manipulator'); const p0 = g.power(d);
+      for (let i = 0; i < 14; i++) card(g, me, 'Swamp', 'gy'); g.emit('effect', 'x');
+      return { ok: g.power(d) === p0 + 4, note: `power ${p0} -> ${g.power(d)}` };
+    },
+  },
   {
     card: 'Force of Negation', title: 'free (exile a blue card) only on an opponent\'s turn',
     wrong: '(regression guard for the general alternative-cost code)',

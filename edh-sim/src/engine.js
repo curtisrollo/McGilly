@@ -306,6 +306,7 @@
     else if (/prevent all damage that sources of the color of your choice would deal this turn/.test(l)) fx.push({ k: 'fog', color: true }); // (Prismatic Strands: the attack's colour)
     if (/^target player can't cast spells this turn/.test(l)) fx.push({ k: 'silence' }); // (Orim's Chant)
     if (/target player mills cards equal to cardname's power/.test(l)) fx.push({ k: 'millOpp', n: 'POWER' }); // (Veteran Ice Climber)
+    if ((m = l.match(/^cardname deals (\d+) damage to target attacking or blocking creature/))) fx.push({ k: 'damage', n: +m[1], to: 'creature' }); // (Razorgrass Ambush: any creature here)
     if (/creatures you control gain flying and get \+x\/\+x until end of turn, where x is the number of creatures you control/.test(l)) fx.push({ k: 'overrun', p: 'X', t: 'X', kw: ['flying'] }); // (Moonshaker Cavalry)
     if ((m = l.match(/untap up to (one|two|three|\d+) lands/))) fx.push({ k: 'untapLandsUpTo', n: num(m[1]) }); // (Cloud of Faeries)
     if (/target artifact, creature, or planeswalker an opponent controls loses all abilities until your next turn/.test(l)) fx.push({ k: 'neutralize', short: true }); // (Azure Beastbinder)
@@ -354,6 +355,7 @@
       if (low === 'overload') a.overload = parseCost(arg);
       if (low === 'dash') a.dash = parseCost(arg);
       if (low === 'delve') a.delve = true;
+      if (low === 'evolve') a.evolve = true;
       if (low === 'ward' && /^\d+$/.test(arg || '')) { a.wardMana = +arg; a.kw.add('ward'); }
       if (low === 'ravenous') { a.etbCounters = 'X'; a.ravenous = true; } // enters with X +1/+1 counters; X >= 5: draw a card
       if (low === 'mobilize') a.mobilize = +arg || 1;
@@ -417,6 +419,8 @@
       if ((m = low.match(/^whenever cardname attacks(?: for the first time each turn)?( an opponent)?,?\s*(.*)$/))) {
         if (/there is an additional combat phase/.test(low)) {
           a.attack.push({ k: 'extraCombat', untapAll: /untap all creatures you control/.test(low), dethrone: /most life/.test(low) });
+        } else if (/put a creature card with mana value x or less from your hand onto the battlefield tapped and attacking, where x is the number of attacking creatures/.test(low)) {
+          a.attack.push({ k: 'cheatAttack', subs: null, mvAttackers: true }); // (Kinscaer Sentry)
         } else if (/put an? ([a-z, ]+?) creature card from your hand onto the battlefield tapped and attacking/.test(low)) {
           const subs = low.match(/put an? ([a-z, ]+?) creature card/)[1].replace(/ or /g, ',').split(',').map((s) => cap(s.trim())).filter(Boolean);
           a.attack.push({ k: 'cheatAttack', subs });
@@ -476,6 +480,11 @@
       if (/^whenever you attack, target attacking creature connives x, where x is the number of attacking creatures/.test(low)) { a.triggers.push({ k: 'youAttack', fx: [{ k: 'conniveAttacker' }] }); continue; }
       if ((m = low.match(/^whenever you attack, creatures you control with counters on them gain ([a-z ]+) until end of turn/))) { a.triggers.push({ k: 'youAttack', fx: [{ k: 'countersKw', kw: m[1].trim() }] }); continue; }
       if (/^creatures you control with \+1\/\+1 counters on them can't be blocked/.test(low)) { a.statics.push({ k: 'counterUnblockable' }); continue; } // (Herald of Secret Streams)
+      if ((m = low.match(/^noncreature spells cost \{(\d+)\} more to cast/))) { a.statics.push({ k: 'taxNoncreature', n: +m[1] }); continue; } // (Thalia, for everyone)
+      if ((m = low.match(/^cardname gets \+(\d+)\/\+0 for every (\w+) cards in your graveyard/))) { a.gyPower = { p: +m[1], per: num(m[2]) }; continue; } // (Dark Matter Manipulator)
+      if (/^as an additional cost to cast cardname, exile (\w+) cards from your graveyard/.test(low)) { a.addCost = 'exileGy:' + num(low.match(/exile (\w+) cards/)[1]); continue; } // (Abhorrent Oculus)
+      if (/^at the beginning of each opponent's upkeep, manifest dread/.test(low)) { a.upkeep.push({ opp: true, fx: [{ k: 'tokens', n: 1, p: 2, t: 2, sub: 'Manifest', colors: '' }] }); continue; } // (a face-down 2/2)
+      if (/^whenever one or more permanent cards are put into your graveyard from anywhere while cardname has a -1\/-1 counter on it, remove a -1\/-1 counter/.test(low)) { a.gyShrinkRemove = true; continue; } // (Moonshadow)
       if (/^whenever you cycle or discard another card, put a -1\/-1 counter on each creature your opponents control/.test(low)) { a.triggers.push({ k: 'discardShrink' }); continue; } // (Archfiend of Ifnir)
       if (/^activated abilities of artifacts your opponents control can't be activated/.test(low)) { a.statics.push({ k: 'karn' }); continue; }
       if (/^all permanents are artifacts in addition to their other types/.test(low)) { a.statics.push({ k: 'lattice' }); continue; }
@@ -596,7 +605,7 @@
     if (opts.length) a.mana = { opts, oneShot, dork: a.isCreature };
     if (a.isLand) a.unmodeled = a.unmodeled.filter((l) => !/enters tapped|you may pay [23] life|return a land you control to its owner.s hand|becomes tapped, it deals 1 damage/i.test(l));
     // lines whose keyword is implemented elsewhere (the keyword list / enterBattlefield)
-    const kwDone = [[a.delve, /^delve/i], [a.mobilize, /^mobilize/i], [a.ravenous, /^ravenous/i], [a.etbMinus, /enters with (a|one|two|three|four|five|six|\w+) -1\/-1 counters? on it/i], [a.wardMana, /^(flying, )?ward \{\d+\}$/i]];
+    const kwDone = [[a.delve, /^delve/i], [a.mobilize, /^mobilize/i], [a.ravenous, /^ravenous/i], [a.evolve, /^evolve/i], [a.etbMinus, /enters with (a|one|two|three|four|five|six|\w+) -1\/-1 counters? on it/i], [a.wardMana, /^(flying, )?ward \{\d+\}$/i]];
     a.unmodeled = a.unmodeled.filter((l) => !kwDone.some(([on, re]) => on && re.test(l)));
     if (a.isLand) {
       const lo = otext.toLowerCase();
@@ -1240,6 +1249,7 @@ function analyzeCard(data, deckColors, fullName) {
     }
     _pt(c) {
       let p = c.info.power ?? 0, t = c.info.toughness ?? 0;
+      if (c.info.gyPower) p += c.info.gyPower.p * Math.floor(this.P(c.ctrl).gy.length / c.info.gyPower.per); // (Dark Matter Manipulator)
       if (c.info.ptStar) { const n = this.P(c.ctrl).bf.filter((x) => x.info.isCreature).length; p = Math.max(p, Math.min(n, 8)); t = Math.max(t, Math.min(n, 8)); }
       if (c.info.name === 'Construct token' || /Construct/.test(c.info.name)) { const n = this.P(c.ctrl).bf.filter((x) => x.info.types.has('Artifact')).length; p += n; t += n; }
       p += c.p1 + c.eot.p; t += c.p1 + c.eot.t;
@@ -1369,6 +1379,7 @@ function analyzeCard(data, deckColors, fullName) {
       if (voider) { c.zone = 'exile'; c.voidBy = voider.seat; owner.exile.push(c); return; }
       if (!c.token && (owner.emblems || []).includes('tamiyo')) { c.zone = 'hand'; owner.hand.push(c); return; } // Tamiyo, the Moon Sage's emblem: it goes back to hand
       c.zone = 'gy'; owner.gy.push(c);
+      if (c.info.isPermanent) for (const x of owner.bf) if (x.info.gyShrinkRemove && x.p1 < 0) x.p1 += 1; // (Moonshadow)
       if (c.info.isLand) { if (this._landBatch) this._landBatch.add(owner.seat); else for (const x of owner.bf) for (const t of x.info.triggers) if (t.k === 'landToGy') this.resolveEffects(owner, t.fx, x, null, false); }
     }
     discardCard(p, c) {
@@ -1871,7 +1882,12 @@ function analyzeCard(data, deckColors, fullName) {
     }
 
     // Creature-enters triggers (Terror of the Peaks, Dragon Tempest, ...); called for cards and tokens alike
+    // a creature a "put it onto the battlefield attacking" trigger can bring: of its types (Kaalia), or with mana value up to
+    // the number of attackers (Kinscaer Sentry)
+    cheatFits(c, f, attacking) { return c.info.isCreature && (!f.subs || f.subs.some((s2) => (c.info.subtypes || []).includes(s2))) && (!f.mvAttackers || (c.info.mv || 0) <= attacking); }
     creatureEntered(p, c) {
+      // evolve: a creature entering with greater power or toughness grows each evolver by a +1/+1 counter
+      if (c.info.isCreature) for (const e of p.bf) if (e !== c && e.info.evolve && (this.power(c) > this.power(e) || this.toughness(c) > this.toughness(e))) e.p1 += this.counterAmount(p, 1);
       const prevEntering = this._entering; this._entering = c;
       for (const src of [...p.bf]) for (const fx of (src.info.myCreatureEtb || [])) if (src !== c) this.resolveEffects(p, fx, src, null, true);
       this._entering = prevEntering;
@@ -3613,6 +3629,8 @@ function analyzeCard(data, deckColors, fullName) {
       if (from === 'gy') red += this.statics(p, 'reduceGy').reduce((s2, x) => s2 + x.s.n, 0);
       if (c.info.henge) red += Math.max(0, ...p.bf.filter((x) => x.info.isCreature).map((x) => this.power(x)));
       if (red) cost = { ...cost, generic: Math.max(0, cost.generic - red) };
+      // Thalia: noncreature spells cost more, for every player
+      if (!c.info.isCreature && !c.info.isLand) { const tax = this.alive().reduce((a2, q) => a2 + this.statics(q, 'taxNoncreature').reduce((b, x) => b + x.s.n, 0), 0); if (tax) cost = { ...cost, generic: cost.generic + tax, mv: (cost.mv || 0) + tax }; }
       if (c.info.convoke) { const helpers = p.bf.filter((x) => x.info.isCreature && !x.tapped && !this.canAttack(x)).length; cost = { ...cost, generic: Math.max(0, cost.generic - helpers) }; }
       // delve: each card exiled from the graveyard pays for one generic mana (exiled in castSpell)
       if (c.info.delve) { const n = Math.min(cost.generic, p.gy.filter((x) => x !== c).length); c._delveN = n; if (n) cost = { ...cost, generic: cost.generic - n }; }
@@ -3882,6 +3900,7 @@ function analyzeCard(data, deckColors, fullName) {
       if (k === 'discard1' || k === 'discard2') { const n = k === 'discard2' ? 2 : 1; if (others.length < n) return false; if (commit) for (let i = 0; i < n; i++) { const d = others.filter((x) => p.hand.includes(x)).sort((a, b) => this.cardValue(p, a) - this.cardValue(p, b))[0]; this.discardCard(p, d); } return true; }
       if (k === 'discardOrLife3') { if (this.canPayLife(p, 3)) { if (commit) this.loseLife(p, 3); return true; } if (!others.length) return false; if (commit) { const d = others.slice().sort((a, b) => this.cardValue(p, a) - this.cardValue(p, b))[0]; this.discardCard(p, d); } return true; }
       if (k === 'sacCreature') { const f = p.bf.filter((x) => x.info.isCreature && !x.isCommander).sort((a, b) => this.creatureValue(a) - this.creatureValue(b))[0]; if (!f || this.creatureValue(f) > 6) return false; if (commit) this.destroy(f, 'sacrificed', true); return true; }
+      if (k.startsWith('exileGy:')) { const n = +k.split(':')[1]; if (p.gy.length < n) return false; if (commit) { const ex = p.gy.slice().sort((a, b) => (a.info.isCreature ? 10 : 0) + (a.info.mv || 0) * 0.3 - ((b.info.isCreature ? 10 : 0) + (b.info.mv || 0) * 0.3)).slice(0, n); for (const x of ex) { this.removeFrom(p.gy, x); x.zone = 'exile'; p.exile.push(x); } } return true; } // (Abhorrent Oculus)
       if (k === 'sacLand') { const f = p.bf.filter((x) => x.info.isLand).sort((a, b) => this.landKeep(p, a) - this.landKeep(p, b))[0]; if (!f) return false; if (commit) this.destroy(f, 'sacrificed', true); return true; }
       return true;
     }
@@ -5205,7 +5224,7 @@ function analyzeCard(data, deckColors, fullName) {
         const badTrade = worstTrade && aVal > worstTrade.bVal + 2 && aVal >= 6;
         let go = !badBlock && !badTrade;
         // Kaalia and friends: the attack trigger is the point, so swing whenever there is something to put in
-        const cheat = a.info.attack.some((f) => f.k === 'cheatAttack' && p.hand.some((c) => c.info.isCreature && f.subs.some((s2) => (c.info.subtypes || []).includes(s2))));
+        const cheat = a.info.attack.some((f) => f.k === 'cheatAttack' && p.hand.some((c) => this.cheatFits(c, f, cands.length)));
         const valueTrig = cheat || a.info.attack.some((f) => f.k === 'extraCombat' || f.k === 'tokens' || f.k === 'draw' || f.k === 'drain');
         if (cheat) go = true;
         else if (valueTrig && !badBlock) go = true;
@@ -5370,7 +5389,7 @@ function analyzeCard(data, deckColors, fullName) {
       for (const a of attackers.slice()) {
         for (const f of a.info.attack) {
           if (f.k === 'cheatAttack') {
-            const cheat = p.hand.filter((c) => c.info.isCreature && f.subs.some((s) => (c.info.subtypes || []).includes(s))).sort((x, y) => this.creatureValue(y) - this.creatureValue(x))[0];
+            const cheat = p.hand.filter((c) => this.cheatFits(c, f, attackers.length)).sort((x, y) => this.creatureValue(y) - this.creatureValue(x))[0];
             if (cheat) {
               this.removeFrom(p.hand, cheat);
               this.enterBattlefield(cheat, p, { tapped: true });
