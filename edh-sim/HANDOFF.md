@@ -24,8 +24,10 @@ a heuristic AI steered by a small neural network, and a single-page web app publ
 - Win rates: play N four-player games with random pods and count winners per deck (25% is an even share).
 
 ## Where things stand
-- Latest network: 6 gens x 1500 games; A/B 26.2% with vs 24.6% without (3000 games), the same as the 4 x 800 run before it,
-  so more games alone no longer help. Bigger gains need the network to steer more decisions (combat, targeting).
+- Latest network: 40 board features (_nnRich), 6 x 1500 games on 9 cores. Fair test on the same 2,250 games:
+  27.6% with vs 24.1% without (+3.5); the previous network on the previous engine: 27.1% vs 24.3% (+2.8).
+  The network is the main board scorer in lookValue (it predicts winners better than the hand weights at every
+  stage: 46% vs 41%). Compare networks with fixed-seed games, not each run's own A/B (that one said +5.6).
 - Win rates (400 games): Edgar 35, Beledros 33, Kaalia 28, Atraxa 28, Myrkul 22, Muldrotha 17, Osgir 11.
   The engine decks still die to fast aggro before their engines come online.
 - Recent AI work: look-ahead on engine turns, attack/removal targeting by threat, wipes held for real trades or danger,
@@ -47,6 +49,10 @@ a heuristic AI steered by a small neural network, and a single-page web app publ
 - Next: fix the top patterns generically (attack look-ahead that can add attackers / go all-in; main 1 vs main 2), then
   the network as the board scorer, with training spread across cores.
 - A/B harness pattern: `looseSeats: [seat]` gives one seat the new candidates; 25% is an even share.
+
+## Speed
+- pt, kws and creatureValue are cached per card (cacheKey: event tick, battlefield sizes, life totals, the card's
+  own counters/pump). Checked against fresh values: 5.6M lookups, 0 mismatches. 100 games: 1:43.
 
 ## Open ideas
 - Remaining small audit items: Staff of Domination untap creature, Goblin Welder on opponents' artifacts, Lattice colour
