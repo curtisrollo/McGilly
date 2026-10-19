@@ -28,6 +28,7 @@ a heuristic AI steered by a small neural network, and a single-page web app publ
   27.6% with vs 24.1% without (+3.5); the previous network on the previous engine: 27.1% vs 24.3% (+2.8).
   The network is the main board scorer in lookValue (it predicts winners better than the hand weights at every
   stage: 46% vs 41%). Compare networks with fixed-seed games, not each run's own A/B (that one said +5.6).
+  Tool: `node compare-nets.mjs <nn.json|none> 2000` (same 2,000 games every time). 7-deck network: 25.8%.
 - Win rates (400 games): Edgar 35, Beledros 33, Kaalia 28, Atraxa 28, Myrkul 22, Muldrotha 17, Osgir 11.
   The engine decks still die to fast aggro before their engines come online.
 - Raffine was added, fully modelled (its card support stays in the engine), then removed at the user's request. An 8-deck
