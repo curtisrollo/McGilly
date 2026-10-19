@@ -2179,10 +2179,10 @@ function analyzeCard(data, deckColors, fullName) {
           if (want.length && this.canPayLife(p, fetchLife)) {
             const pick = want.sort((a, b) => this.landValue(p, b) - this.landValue(p, a))[0];
             this.removeFrom(p.library, pick); this.R.shuffle(p.library); this.searched(p); // a search (Archivist of Oghma sees it)
+            if (!o.quiet) this.emit('land', `${p.name} cracks ${c.info.name} for ${pick.info.name}.`, { seat: p.seat, cards: [pick.id] }); // (said first: paying the life can end the game)
             this.moveToGraveyard(c);
             if (/pay 1 life/i.test(c.info.text)) this.loseLife(p, 1);
             this.enterBattlefield(pick, p, { tapped: c.info.fetch.tapped && !(/four or more lands/i.test(c.info.text || '') && p.bf.filter((x) => x.info.isLand).length + 1 >= 4), quiet: true });
-            if (!o.quiet) this.emit('land', `${p.name} cracks ${c.info.name} for ${pick.info.name}.`, { seat: p.seat, cards: [pick.id] });
           }
           return;
         }
@@ -4143,9 +4143,9 @@ function analyzeCard(data, deckColors, fullName) {
       }
       return this;
     }
-    loop() {
-      let first = true;
-      let lastSeat = -1;
+    loop(lastSeat0 = -1) {
+      let first = lastSeat0 < 0;
+      let lastSeat = lastSeat0;
       const order = (seat) => (seat - this.startSeat + 4) % 4;
       while (!this.over) {
         this.checkTime();
@@ -4373,6 +4373,63 @@ function analyzeCard(data, deckColors, fullName) {
       return val(true) >= val(false) - 2;
     }
     // Play a copy on to the start of `seat`'s next turn, or the end of the game (for look-aheads past this turn)
+    // ----- "Try a different line": a decision point's options, each played out to the end of the game -----
+    // A recorded game notes its decision points (each main phase, and each combat with an attacker). The page rebuilds the
+    // game at one (same seed: the engine is deterministic), lists the options there, and plays each to the end of the game
+    // several times; playout k of every option gets the same shuffles, so they're compared on the same luck.
+    static atDecision(decks, db, seed, opts, n) {
+      const g = new Game(decks, db, seed, { ...opts, record: false });
+      let k = 0, found = null; const stop = {};
+      g.onDecision = (p, kind) => { if (k++ === n) { found = { base: g.cloneForLook(), seat: p.seat, kind }; throw stop; } };
+      try { g.run(); } catch (e) { if (e !== stop) throw e; }
+      return found;
+    }
+    lineOptions(seat, kind) {
+      const p = this.players[seat], out = [{ kind: 'ai', label: 'What the AI does' }];
+      if (kind === 'combat') {
+        const able = p.bf.filter((c) => this.canAttack(c));
+        out.push({ kind: 'attack', ids: [], label: 'No attack' });
+        for (const q of this.opps(p)) out.push({ kind: 'attack', ids: able.map((c) => c.id), q: q.seat, label: `Attack ${q.name} with everything` });
+        const evasive = able.filter((c) => this.hasKw(c, 'flying') || this.hasKw(c, 'menace') || this.hasKw(c, 'trample'));
+        if (evasive.length && evasive.length < able.length) for (const q of this.opps(p)) out.push({ kind: 'attack', ids: evasive.map((c) => c.id), q: q.seat, label: `Attack ${q.name} with only ${this.listNames(evasive.map((c) => this.cname(c)), 3)}` });
+        return out;
+      }
+      const second = kind === 'main 2';
+      out.push({ kind: 'pass', label: second ? 'Do nothing more: end the turn' : 'Cast nothing now: go to combat' });
+      const seen = new Set();
+      for (const o of this.castOptions(p)) { if (seen.has(o.c.info.name + o.from)) continue; seen.add(o.c.info.name + o.from); out.push({ kind: 'cast', id: o.c.id, from: o.from, gyType: o.gyType, label: `Cast ${o.c.info.name}${o.from !== 'hand' ? ` (${o.from})` : ''}` }); }
+      for (const a of this.abilityOptions(p, second, new Set(), true).slice(0, 8)) out.push({ kind: 'ability', key: a.key, label: `Use ${a.c.info.name}` });
+      return out.slice(0, 16);
+    }
+    // on a copy at the decision: make the choice, then let the AI finish the turn
+    applyLine(seat, kind, o) {
+      const p = this.players[seat], second = kind === 'main 2';
+      if (o.kind === 'ai') return this.restOfTurn(p, kind);
+      if (o.kind === 'attack') { if (o.ids.length) { this._forcedAtk = { q: o.q, ids: o.ids }; this.combat(p); this._forcedAtk = null; } if (!this.over && !p.lost) this.restOfTurn(p, 'main 2'); return; }
+      if (o.kind === 'pass') return this.restOfTurn(p, second ? 'end' : 'combat');
+      if (o.kind === 'cast') { const c = this.cards[o.id]; if (!c || !this.castSpell(p, c, o.from, o.gyType)) return false; }
+      if (o.kind === 'ability') { const a = this.abilityOptions(p, second, new Set(), true).find((x) => x.key === o.key); if (!a) return false; this.doActivate(p, a); }
+      if (!this.over && !p.lost) this.restOfTurn(p, kind);
+    }
+    // the rest of the game from the end of the current turn
+    continueGame() {
+      try {
+        if (!this.over) { const last = this.active; do { this.active = (this.active + 1) % this.players.length; } while (this.P(this.active).lost && !this.over); if (!this.over) this.loop(last); }
+      } catch (e) { if (!(e instanceof Runaway)) throw e; this.over = true; this.winner = null; this.runaway = true; }
+      return this;
+    }
+    // one playout of an option: the winner's seat (null for a draw), or undefined if the option can't be made
+    playLine(base, seat, kind, o, k, full = false) {
+      base._lookN = 5000 + k; const g = base.cloneForLook();
+      // the decision's turn is played at full strength (with the look-ahead), so "what the AI does" is what the real AI does;
+      // the rest of the game is played fast (no look-ahead) unless full
+      g._inLook = false; g.lookahead = base.lookahead;
+      if (Game.TIME_LIMIT) g.deadline = Date.now() + Game.TIME_LIMIT;
+      try { if (this.applyLine.call(g, seat, kind, o) === false) return undefined; } catch (e) { if (!(e instanceof Runaway)) throw e; return null; }
+      if (!full) g._inLook = true;
+      g.continueGame();
+      return g.winner == null ? null : g.winner;
+    }
     playToTurnOf(seat) {
       for (let guard = 0; guard < 8 && !this.over; guard++) {
         do { this.active = (this.active + 1) % this.players.length; } while (this.P(this.active).lost && !this.over);
@@ -4384,9 +4441,10 @@ function analyzeCard(data, deckColors, fullName) {
     // mid-turn with it, so a copy finishes the turn exactly the way a real turn goes.
     restOfTurn(p, from = 'main') {
       const order = ['main', 'combat', 'main 2', 'end'], at = (ph) => order.indexOf(ph) >= order.indexOf(from);
-      if (at('main')) { this.phase = 'main'; this.mainPhase(p); if (p.lost || this.over) return; }
-      if (at('combat')) { this.emptyPools(); this.phase = 'combat'; this.combat(p); if (p.lost || this.over) return; }
-      if (at('main 2')) { this.emptyPools(); this.phase = 'main 2'; this.mainPhase(p, true); if (p.lost || this.over) return; }
+      // (onDecision: the real game's decision points, for "try a different line"; copies of the game don't carry it)
+      if (at('main')) { this.phase = 'main'; if (this.onDecision) this.onDecision(p, 'main'); this.mainPhase(p); if (p.lost || this.over) return; }
+      if (at('combat')) { this.emptyPools(); this.phase = 'combat'; if (this.onDecision && p.bf.some((c) => this.canAttack(c))) this.onDecision(p, 'combat'); this.combat(p); if (p.lost || this.over) return; }
+      if (at('main 2')) { this.emptyPools(); this.phase = 'main 2'; if (this.onDecision) this.onDecision(p, 'main 2'); this.mainPhase(p, true); if (p.lost || this.over) return; }
       // end step
       this.emptyPools();
       this.phase = 'end';

@@ -8,7 +8,6 @@ import osgir from './scenarios/osgir.mjs';
 import myrkul from './scenarios/myrkul.mjs';
 import atraxa from './scenarios/atraxa.mjs';
 import beledros from './scenarios/beledros.mjs';
-import raffine from './scenarios/raffine.mjs';
 const core = [
   {
     card: 'Craterhoof Behemoth', title: 'blocks by playing plans out: two 3/3s double-block and kill an attacking 5/5',
@@ -895,4 +894,4 @@ const core = [
   },
 ];
 
-export default [...core, ...muldrotha, ...osgir, ...myrkul, ...atraxa, ...beledros, ...raffine];
+export default [...core, ...muldrotha, ...osgir, ...myrkul, ...atraxa, ...beledros];

@@ -40,6 +40,7 @@
   const state = {
     seats: [], seed: 0, game: null, events: [], meta: {}, idx: 0, playing: false, speed: 1, timer: null,
     showHands: false, inspect: null,
+    decisions: [], branch: null, line: null,
   };
 
   function load(key, def) { try { const v = localStorage.getItem('podnight.' + key); return v == null ? def : JSON.parse(v); } catch { return def; } }
@@ -97,9 +98,16 @@
       if (e.key === ' ') { e.preventDefault(); togglePlay(); }
       if (e.key === 'ArrowRight') { pause(); go(state.idx + 1); }
       if (e.key === 'ArrowLeft') { pause(); go(state.idx - 1); }
-      if (e.key === 'Escape') { state.inspect = null; renderInspect(); $('#more').hidden = true; state.zoneView = null; renderZone(); }
+      if (e.key === 'Escape') { closeLine(); state.inspect = null; renderInspect(); $('#more').hidden = true; state.zoneView = null; renderZone(); }
     });
     $('#runStats').addEventListener('click', runStats);
+    $('#openLine').addEventListener('click', openLine);
+    $('#closeLine').addEventListener('click', closeLine);
+    $('#lineView').addEventListener('click', (e) => { if (e.target.id === 'lineView') closeLine(); });
+    $('#lineCompare').addEventListener('click', () => compareLines(10));
+    $('#lineMore').addEventListener('click', () => compareLines(10));
+    $('#lineList').addEventListener('click', (e) => { const b = e.target.closest('[data-play]'); if (b) playBranch(+b.dataset.play); });
+    $('#lineSaved').addEventListener('click', (e) => { if (e.target.id === 'lineExport') exportLines(); });
     document.addEventListener('click', (e) => {
       const z = e.target.closest('.zbtn');
       if (z) { state.zoneView = { zone: z.dataset.zone, seat: +z.dataset.seat }; renderZone(); }
@@ -122,7 +130,9 @@
   function startGame(autoplay = true) {
     pause();
     const g = new Game(seatDecks(), db, state.seed, { record: true, nn: NN });
+    const decisions = []; g.onDecision = (p, kind) => decisions.push({ n: decisions.length, ev: g.events.length, seat: p.seat, kind, round: g.round });
     g.run();
+    state.decisions = decisions; state.branch = null;
     state.game = g;
     state.events = g.events;
     state.meta = {};
@@ -507,6 +517,114 @@
   }
 
   // ---------- batch stats ----------
+  // ---------- try another line ----------
+  // The decision point being viewed: the last one at or before this step (a branch's own decisions come from its base game).
+  const PHASE = { main: 'first main phase', 'main 2': 'second main phase', combat: 'combat' };
+  function currentDecision() {
+    const list = state.branch ? state.branch.decisions : state.decisions;
+    let d = null; for (const x of list) if (x.ev <= state.idx) d = x; else break;
+    return d;
+  }
+  function openLine() {
+    pause();
+    const d = currentDecision();
+    const name = (seat) => seatDecks()[seat].name;
+    if (!d) { state.line = null; $('#lineSub').textContent = 'Step forward to the first turn: decisions start there.'; $('#lineList').innerHTML = ''; $('#lineVerdict').textContent = ''; $('#lineCompare').hidden = true; $('#lineMore').hidden = true; renderSaved(); $('#lineView').hidden = false; return; }
+    const src = state.branch ? state.branch.src : { seed: state.seed, seats: state.seats.slice() };
+    const at = Game.atDecision(src.seats.map((id) => decks.find((x) => x.id === id)), db, src.seed, { nn: NN }, d.n);
+    if (!at) { $('#lineSub').textContent = 'Could not rebuild this point of the game.'; $('#lineView').hidden = false; return; }
+    const opts = at.base.lineOptions(at.seat, at.kind).map((o) => ({ ...o, w: 0, dr: 0, n: 0, bad: 0 }));
+    state.line = { d, at, opts, src, k: 0, busy: false };
+    $('#lineSub').textContent = `Round ${d.round}, ${name(d.seat)}'s ${PHASE[d.kind]}. The win rate is ${name(d.seat)}'s.`;
+    $('#lineCompare').hidden = false; $('#lineMore').hidden = true; $('#lineVerdict').textContent = ''; $('#lineProg').textContent = '';
+    renderLineList(); renderSaved();
+    $('#lineView').hidden = false;
+  }
+  function closeLine() { if (state.line) state.line.cancel = true; $('#lineView').hidden = true; }
+  function renderLineList() {
+    const L = state.line; if (!L) return;
+    const done = L.opts.filter((o) => o.n);
+    const best = done.length ? done.reduce((a, b) => (b.w / b.n > a.w / a.n ? b : a)) : null;
+    $('#lineList').innerHTML = L.opts.map((o, i) => {
+      const pct = o.n ? Math.round(o.w / o.n * 100) : null;
+      const cls = (o.kind === 'ai' ? 'ai ' : '') + (best === o && done.length > 1 ? 'best' : '');
+      return `<li class="${cls}"><span class="lbl">${esc(o.label)}${o.kind === 'ai' ? '<span class="tag">AI</span>' : ''}</span>`
+        + `<div class="bar"><div style="width:${pct ?? 0}%;background:var(--brass)"></div></div>`
+        + `<span class="v">${o.bad && !o.n ? "can't be done" : pct == null ? '' : `${pct}% · ${o.n} games${o.dr ? `, ${o.dr} draws` : ''}`}</span>`
+        + `<button type="button" class="btn" data-play="${i}" ${o.bad && !o.n ? 'disabled' : ''}>Play it out</button></li>`;
+    }).join('');
+  }
+  function compareLines(n) {
+    const L = state.line; if (!L || L.busy) return;
+    L.busy = true; L.cancel = false; $('#lineCompare').disabled = true; $('#lineMore').disabled = true;
+    const k0 = L.k, total = n * L.opts.length; let done = 0, k = k0, i = 0;
+    const step = () => {
+      if (L.cancel || state.line !== L) { L.busy = false; return; }
+      const t0 = performance.now();
+      while (done < total && performance.now() - t0 < 60) {
+        const o = L.opts[i];
+        if (!(o.bad && !o.n)) {
+          const w = L.at.base.playLine(L.at.base, L.at.seat, L.at.kind, o, k);
+          if (w === undefined) o.bad++; else { o.n++; if (w === L.at.seat) o.w++; else if (w === null) o.dr++; }
+        }
+        done++; i++; if (i >= L.opts.length) { i = 0; k++; }
+      }
+      $('#lineProg').textContent = `playing… ${Math.round(done / total * 100)}%`;
+      if (done < total) { renderLineList(); setTimeout(step, 0); return; }
+      L.k = k0 + n; L.busy = false; $('#lineCompare').disabled = false; $('#lineMore').disabled = false;
+      $('#lineCompare').hidden = true; $('#lineMore').hidden = false; $('#lineProg').textContent = '';
+      renderLineList(); renderVerdict(); saveLine();
+    };
+    step();
+  }
+  // same luck for every option, so a simple two-standard-error rule says whether a gap is real
+  function renderVerdict() {
+    const L = state.line, ai = L.opts.find((o) => o.kind === 'ai');
+    const done = L.opts.filter((o) => o.n); if (!ai || !ai.n || done.length < 2) return;
+    const best = done.reduce((a, b) => (b.w / b.n > a.w / a.n ? b : a));
+    const p = (o) => o.w / o.n, se = (o) => Math.sqrt(Math.max(p(o) * (1 - p(o)), 0.05) / o.n);
+    if (best === ai || p(best) - p(ai) <= 0) { $('#lineVerdict').textContent = 'Nothing here beats what the AI does.'; return; }
+    const gap = p(best) - p(ai), real = gap > 2 * Math.hypot(se(best), se(ai));
+    $('#lineVerdict').textContent = `${best.label}: ${Math.round(p(best) * 100)}% vs the AI's ${Math.round(p(ai) * 100)}%. ` + (real ? 'That gap is clear.' : 'Too close to call yet: play 10 more each.');
+  }
+  // compared decision points are kept (in this browser) so they can be exported for training
+  function saveLine() {
+    const L = state.line; const all = load('lines', []);
+    const rec = { when: new Date().toISOString(), seed: L.src.seed, seats: L.src.seats, nnGen: NN ? NN.gen : null, decision: L.d.n, round: L.d.round, seat: L.d.seat, kind: L.d.kind,
+      options: L.opts.filter((o) => o.n).map((o) => ({ label: o.label, kind: o.kind, id: o.id, from: o.from, key: o.key, ids: o.ids, q: o.q, wins: o.w, draws: o.dr, games: o.n })) };
+    const j = all.findIndex((x) => x.seed === rec.seed && x.decision === rec.decision && x.seats.join() === rec.seats.join());
+    if (j >= 0) all[j] = rec; else all.push(rec);
+    save('lines', all.slice(-500)); renderSaved();
+  }
+  function renderSaved() {
+    const n = load('lines', []).length;
+    $('#lineSaved').innerHTML = n ? `${n} compared decision${n === 1 ? '' : 's'} saved in this browser. <button type="button" class="btn" id="lineExport">Download them (JSON)</button>` : '';
+  }
+  function exportLines() {
+    const blob = new Blob([JSON.stringify({ lines: load('lines', []) }, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'pod-night-lines.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  // play one option out as a new replay: the game up to here, then that choice, then the full AI to the end
+  function playBranch(i) {
+    const L = state.line; if (!L) return;
+    const o = L.opts[i], base = L.at.base;
+    base._lookN = 9000; const g = base.cloneForLook();
+    g._inLook = false; g.lookahead = base.lookahead; g.record = true;
+    const prefixFrom = state.branch ? state.branch.events : state.events;
+    g.events = prefixFrom.slice(0, L.d.ev);
+    const decisions = (state.branch ? state.branch.decisions : state.decisions).filter((x) => x.n <= L.d.n);
+    g.emit('effect', `Another line: ${seatDecks()[L.d.seat].name} — ${o.label}.`, { seat: L.d.seat });
+    if (g.applyLine(L.d.seat, L.d.kind, o) === false) { $('#lineVerdict').textContent = "That option can't be made here."; return; }
+    g.continueGame();
+    closeLine();
+    state.branch = { src: L.src, events: g.events, decisions, label: o.label };
+    state.game = g; state.events = g.events;
+    for (const id in g.cards) state.meta[id] = state.meta[id] || g.cardMeta(g.cards[id]);
+    const scrub = $('#scrub'); scrub.max = state.events.length - 1;
+    state.idx = Math.min(L.d.ev, state.events.length - 1); scrub.value = state.idx;
+    renderLog(); render(); play();
+  }
+
   function runStats() {
     const N = 100;
     const ds = seatDecks();

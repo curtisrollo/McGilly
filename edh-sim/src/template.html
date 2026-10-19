@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Pod Night</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -18,6 +19,7 @@
     <div class="timeline"><input type="range" id="scrub" min="0" max="0" value="0" aria-label="Game timeline"><span class="pos" id="pos"></span></div>
     <label class="chk"><input type="checkbox" id="hands"> Hands</label>
     <label class="chk">Seed <input type="number" id="seed" min="0"></label>
+    <button type="button" class="btn" id="openLine" title="Pick a different play at this point and see how it does">Try another line</button>
     <button type="button" class="btn" id="openMore">Head to head · About</button>
   </header>
   <div class="main">
@@ -61,6 +63,22 @@
     <h2 class="zone-title" id="zoneTitle"></h2>
     <p class="zone-sub">Most recent first. Click a card to read it.</p>
     <div class="cards zone-cards" id="zoneCards"></div>
+  </div>
+</div>
+<div class="drawer" id="lineView" hidden>
+  <div class="drawer-box" role="dialog" aria-labelledby="lineTitle">
+    <button type="button" class="x" id="closeLine" aria-label="Close">×</button>
+    <h2 class="zone-title" id="lineTitle">Try another line</h2>
+    <p class="zone-sub" id="lineSub"></p>
+    <div class="line-actions">
+      <button type="button" class="btn primary" id="lineCompare">Compare (10 games each)</button>
+      <button type="button" class="btn" id="lineMore" hidden>10 more each</button>
+      <span class="line-prog" id="lineProg" aria-live="polite"></span>
+    </div>
+    <ol class="line-list" id="lineList"></ol>
+    <p class="zone-sub" id="lineVerdict" aria-live="polite"></p>
+    <p class="zone-sub">Each option is played to the end of the game. Game k of every option gets the same shuffles, so they're compared on the same luck. The decision's turn is played with the full AI; later turns use the faster AI.
+      <span id="lineSaved"></span></p>
   </div>
 </div>
 <div class="inspect" id="inspect" hidden></div>

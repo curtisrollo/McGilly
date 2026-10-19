@@ -30,9 +30,12 @@ a heuristic AI steered by a small neural network, and a single-page web app publ
   stage: 46% vs 41%). Compare networks with fixed-seed games, not each run's own A/B (that one said +5.6).
 - Win rates (400 games): Edgar 35, Beledros 33, Kaalia 28, Atraxa 28, Myrkul 22, Muldrotha 17, Osgir 11.
   The engine decks still die to fast aggro before their engines come online.
-- Raffine (8th deck, decks/raffine.txt) is fully modelled: audit shows 0 of 526 cards with gaps. Its tests are in
-  scenarios/raffine.mjs. The current network was trained on 7 decks, so the next retrain starts fresh (the deck one-hot
-  grows by one).
+- Raffine was added, fully modelled (its card support stays in the engine), then removed at the user's request. An 8-deck
+  network tied the 7-deck one on the same 2,000 seven-deck games (25.8% each), so the 7-deck network is kept.
+- "Try another line" on the page: at any decision point of a replay (each main phase, each combat), rebuild the game
+  (Game.atDecision: same seed, deterministic), list the options (lineOptions), play each to the end of the game on the same
+  luck (playLine), or play one out as a new replay. Compared decisions are saved in the browser and export as JSON: the
+  plan is to feed verified better lines into training with extra weight (not done yet).
 - Recent AI work: look-ahead on engine turns, attack/removal targeting by threat, wipes held for real trades or danger,
   graveyard-hate awareness (Valgavoth/Dauthi), Beledros untap, Coffers+Urborg, draw-budget guards against decking.
 
